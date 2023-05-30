@@ -40,9 +40,8 @@ void Do_Movement();
 void mouse_callback(GLFWwindow* window, double xPos, double yPos);
 
 // setup of Shader Programs for the 5 shaders used in the application
-void SetupShaders();
-// delete Shader Programs whan application ends
-void DeleteShaders();
+void SetupShaders(int program);
+
 // print on console the name of current shader
 void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
@@ -65,14 +64,14 @@ GLboolean wireframe = GL_FALSE;
 enum available_ShaderPrograms{ FULLCOLOR, FLATTEN, NORMAL2COLOR, WAVE, UV2COLOR };
 enum availabe_Models{Bunny, Cube, Sphere};
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "FULLCOLOR", "FLATTEN", "NORMAL2COLOR", "WAVE", "UV2COLOR" };
+const char * print_available_ShaderPrograms[] = { "FULLCOLOR", "RANDOMNOISE", "NORMAL2COLOR", "UV2COLOR" };
 const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 
 // index of the current shader (= 0 in the beginning)
 GLuint current_program = FULLCOLOR;
 GLuint current_Model = Bunny;
 // a vector for all the Shader Programs used and swapped in the application
-vector<Shader> shaders;
+vector<std::string> shader;
 vector<Model> models;
 
 // Uniforms to pass to shaders
@@ -81,6 +80,7 @@ GLfloat myColor[] = {1.0f,0.0f,0.0f};
 GLfloat colorWhite[] = {0.8f,0.8f,0.8f};
 GLfloat colorDarkRed[] = {0.35f,0.0f,0.0f};
 GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
+
 // weight and velocity for the animation of Wave shader
 GLfloat weight = 0.2f;
 GLfloat speed = 5.0f;
@@ -154,13 +154,15 @@ int main()
     // we enable Z test
     glEnable(GL_DEPTH_TEST);
 
+    // we enable face culling - this is important for the portals
     glEnable(GL_CULL_FACE);
 
     //the "clear" color for the frame buffer
     glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
 
     // we create the Shader Programs used in the application
-    SetupShaders();
+    Shader mainShader("vertexShader.vert", "fragmentSHader.frag");
+    SetupShaders(mainShader.Program);
 
     // we load the model(s) (code of Model class is in include/utils/model.h)
     Model cubeModel("models/cube.obj");
@@ -170,6 +172,7 @@ int main()
     models.push_back(std::move(bunnyModel));
     models.push_back(std::move(cubeModel));
     models.push_back(std::move(sphereModel));
+    models.push_back(std::move(bunnyModel));
     //models.push_back(std::move(david));
 
     Model planeModel("models/plane.obj");
@@ -275,30 +278,12 @@ int main()
         if (spinning)
             orientationY+=(deltaTime*spin_speed);
 
-    
-
-        //SPHERE
-        /*
-          we create the transformation matrix
-          N.B.) the last defined is the first applied
-
-          We need also the matrix for normals transformation, which is the inverse of the transpose of the 3x3 submatrix (upper left) of the modelview.
-          We do not consider the 4th column because we do not need translations for normals.
-          An explanation (where XT means the transpose of X, etc):
-            "Two column vectors X and Y are perpendicular if and only if XT.Y=0.
-            If we're going to transform X by a matrix M, we need to transform Y by some matrix N so that (M.X)T.(N.Y)=0.
-            Using the identity (A.B)T=BT.AT, this becomes (XT.MT).(N.Y)=0 => XT.(MT.N).Y=0.
-            If MT.N is the identity matrix then this reduces to XT.Y=0.
-            And MT.N is the identity matrix if and only if N=(MT)-1, i.e. N is the inverse of the transpose of M.
-
-        */
-        planeShader.Use();
         glEnable(GL_STENCIL_TEST);
 
         glStencilMask(0xFF);
         glClear(GL_STENCIL_BUFFER_BIT);
 
-        for (int i = 1; i <= 4; i++)
+        for (int i = 0; i < 4; i++)
         {
             // Lets do Portals 
             // Step One: Disable Color and Depth Buffer. Enable Stencil Buffer
@@ -318,17 +303,18 @@ int main()
         
 
             // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and increase the stencil value
-            glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i, 0xFF);
+            glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
             glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
 
 
 
             // Step Four: Draw Portal Frame
             //Set up ModelMatrix for the first Plane
+            planeShader.Use();
             planeModelMatrix = glm::mat4(1.0f);
             planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i-1]);
-            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i-1], PortalRotation[i-1]);
+            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
+            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i], PortalRotation[i]);
             planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
             // and the NormalMatrix
             planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
@@ -347,7 +333,7 @@ int main()
 
 
             // Step Five: Generate the virtual Camera
-            glm::mat4 virtualCamera =  glm::lookAt(cameraPos + virtualPos[i-1], cameraPos + virtualPos[i-1] + cameraView, cameraUp);
+            glm::mat4 virtualCamera =  glm::lookAt(cameraPos + virtualPos[i], cameraPos + virtualPos[i] + cameraView, cameraUp);
 
 
 
@@ -360,7 +346,7 @@ int main()
 
             // Step Seven: Set the stencil func to lEqual with reference value 1. Therefore we draw only on pixels with a stencil value equal to 1
             // Here is a mistake. We somehow write on pixels we should not write on 
-            glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i, 0xFF);
+            glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
             
 
 
@@ -368,7 +354,7 @@ int main()
             // For example:
             planeModelMatrix = glm::mat4(1.0f);
             planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i-1]+ glm::vec3(0.0f,-1.0f,0.0f));
+            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i]+ glm::vec3(0.0f,-1.0f,0.0f));
             planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
             //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
             // and the NormalMatrix
@@ -385,7 +371,7 @@ int main()
 
             planeModelMatrix = glm::mat4(1.0f);
             planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i-1]+ glm::vec3(0.0f,-0.999f,0.0f));
+            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i]+ glm::vec3(0.0f,-0.999f,0.0f));
             planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
             //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
             // and the NormalMatrix
@@ -401,23 +387,29 @@ int main()
             planeModel.Draw();
 
 
-            shaders[5-i].Use();
+            mainShader.Use();
+            // Here we swap the subroutines in the fragment shader
+            // first search in the shader program the index corresponding to the portal loop
+            GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[i].c_str());
+            // then change the subroutine accordingly
+            glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
             ModelMatrix = glm::mat4(1.0f);
             NormalMatrix = glm::mat3(1.0f);
-            ModelMatrix = glm::translate(ModelMatrix, virtualPos[i-1]);
+            ModelMatrix = glm::translate(ModelMatrix, virtualPos[i]);
             ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
             ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
             
 
             // if we cast a mat4 to a mat3, we are automatically considering the upper left 3x3 submatrix
             NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(shaders[5-i].Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(shaders[5-i].Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(shaders[5-i].Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniformMatrix4fv(glGetUniformLocation(shaders[5-i].Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(virtualCamera));
-            glUniform3fv(glGetUniformLocation(shaders[5-i].Program, "colorIn"), 1, myColor);
-            glUniform1f(glGetUniformLocation(shaders[5-i].Program, "weight"), weight);
-            glUniform1f(glGetUniformLocation(shaders[5-i].Program, "timer"), currentFrame*speed);
+            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
+            glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
+            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(virtualCamera));
+            glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
+            glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
+            glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
 
             models[Bunny].Draw();
 
@@ -441,8 +433,8 @@ int main()
             //Set up ModelMatrix for the first Plane
             planeModelMatrix = glm::mat4(1.0f);
             planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i-1]);
-            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i-1], PortalRotation[i-1]);
+            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
+            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i], PortalRotation[i]);
             planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
             // and the NormalMatrix
             planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
@@ -469,66 +461,6 @@ int main()
 
 
         }
-        // Step Thirteen: Draw the Rest of the Scene
-        // we reset to identity at each frame
-        /*shaders[current_program].Use();
-        ModelMatrix = glm::mat4(1.0f);
-        NormalMatrix = glm::mat3(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f, 0.0f, 0.0f));
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        if (current_Model == Bunny) {
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));	// It's a bit too big for our scene, so scale it down
-        }
-        else 
-        {
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));	// It's a bit too big for our scene, so scale it down
-        }
-        // if we cast a mat4 to a mat3, we are automatically considering the upper left 3x3 submatrix
-        NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(shaders[current_program].Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(shaders[current_program].Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(shaders[current_program].Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(shaders[current_program].Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-
-        // we render the sphere
-        models[current_Model].Draw();
-
-        //CUBE
-        // we create the transformation matrix and the normals transformation matrix
-        // we reset to identity at each frame
-
-        //Render the two Planes first
-        planeShader.Use();
-
-        cubeModelMatrix = glm::mat4(1.0f);
-        cubeNormalMatrix = glm::mat3(1.0f);
-        cubeModelMatrix = glm::scale(cubeModelMatrix, glm::vec3(1.5f, 2.0f,0.8f)); // It's a bit too big for our scene, so scale it down
-        cubeModelMatrix = glm::translate(cubeModelMatrix, glm::vec3(0.0f, -1.1f, 0.0f));
-        //cubeModelMatrix = glm::rotate(cubeModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        cubeNormalMatrix = glm::inverseTranspose(glm::mat3(view*cubeModelMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(cubeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(cubeNormalMatrix));
-        glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorSandstone);
-
-        // we render the cube
-        models[1].Draw();*/
-
-        /*
-        //BUNNY
-        // we create the transformation matrix and the normals transformation matrix
-        // we reset to identity at each frame
-        bunnyModelMatrix = glm::mat4(1.0f);
-        bunnyNormalMatrix = glm::mat3(1.0f);
-        bunnyModelMatrix = glm::translate(bunnyModelMatrix, glm::vec3(3.0f, 0.0f, 0.0f));
-        bunnyModelMatrix = glm::rotate(bunnyModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        bunnyModelMatrix = glm::scale(bunnyModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));	// It's a bit too big for our scene, so scale it down
-        bunnyNormalMatrix = glm::inverseTranspose(glm::mat3(view*bunnyModelMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(shaders[current_program].Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(bunnyModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(shaders[current_program].Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(bunnyNormalMatrix));
-
-        // we render the bunny
-        bunnyModel.Draw();*/
-
         
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
@@ -573,7 +505,7 @@ int main()
 
     // when I exit from the graphics loop, it is because the application is closing
     // we delete the Shader Programs
-    DeleteShaders();
+    mainShader.Delete();
     planeShader.Delete();
     // we close and delete the created context
     glfwTerminate();
@@ -583,27 +515,46 @@ int main()
 
 //////////////////////////////////////////
 // we create and compile shaders (code of Shader class is in include/utils/shader.h), and we add them to the list of available shaders
-void SetupShaders()
+void SetupShaders(int program)
 {
-    Shader shader1("00_basic.vert", "01_fullcolor.frag");
-    shaders.push_back(shader1);
-    Shader shader2("02_flatten.vert", "02_flatten.frag");
-    shaders.push_back(shader2);
-    Shader shader3("03_normal2color.vert", "03_normal2color.frag");
-    shaders.push_back(shader3);
-    Shader shader4("04_wave.vert", "04_wave.frag");
-    shaders.push_back(shader4);
-    Shader shader5("05_uv2color.vert", "05_uv2color.frag");
-    shaders.push_back(shader5);
+    int maxSub, maxSubU, countActiveSU;
+    GLchar name[256];
+    int len, numComps;
+
+    glGetIntegerv(GL_MAX_SUBROUTINES, &maxSub);
+    glGetIntegerv(GL_MAX_SUBROUTINE_UNIFORM_LOCATIONS, &maxSubU);
+    std::cout << "Max Subroutines: " << maxSub << " - Max Subroutine Uniform: " << maxSubU << std::endl;
+
+    glGetProgramStageiv(program, GL_FRAGMENT_SHADER, GL_ACTIVE_SUBROUTINE_UNIFORMS, &countActiveSU);
+
+    // print Info for every Subroutine uniform 
+    for (int i = 0 ; i < countActiveSU; i++)
+    {
+        glGetActiveSubroutineUniformName(program, GL_FRAGMENT_SHADER, i , 256, &len, name);
+
+        std::cout << "Subroutine Uniform: " << i << " - name: " << name << std::endl;
+
+        glGetActiveSubroutineUniformiv(program, GL_FRAGMENT_SHADER, i, GL_NUM_COMPATIBLE_SUBROUTINES, &numComps);
+
+        int *s = new int[numComps];
+
+        glGetActiveSubroutineUniformiv(program, GL_FRAGMENT_SHADER, i, GL_COMPATIBLE_SUBROUTINES, s);
+        std::cout << "Compatible Subroutines: " << std::endl;
+
+        for (int j = 0; j <numComps; j++)
+        {
+            glGetActiveSubroutineName(program, GL_FRAGMENT_SHADER, s[j], 256, &len, name);
+            std::cout << "\t" << s[j] << " - " << name << "\n";
+            shader.push_back(name);
+        }
+        std:: cout << std:: endl;
+
+        delete[] s;
+    } 
+
 }
 
-//////////////////////////////////////////
-// we delete all the Shaders Programs
-void DeleteShaders()
-{
-    for(GLuint i = 0; i < shaders.size(); i++)
-        shaders[i].Delete();
-}
+
 
 //////////////////////////////////////////
 // we print on console the name of the currently used shader
