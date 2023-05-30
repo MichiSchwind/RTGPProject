@@ -1,0 +1,4 @@
+{
+    "cmake.sourceDirectory": "/Users/michi/2223/include/glm",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+}
