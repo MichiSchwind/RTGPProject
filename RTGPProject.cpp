@@ -646,7 +646,7 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
 
 
         glm::mat4 ModelMatrix = glm::mat4(1.0f);
-        glm::mat4 NormalMatrix = glm::mat3(1.0f);
+        glm::mat3 NormalMatrix = glm::mat3(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
         if (modelType == Bunny)
