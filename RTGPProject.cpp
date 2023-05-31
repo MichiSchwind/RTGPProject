@@ -42,6 +42,9 @@ void mouse_callback(GLFWwindow* window, double xPos, double yPos);
 // setup of Shader Programs for the 5 shaders used in the application
 void SetupShaders(int program);
 
+// Function dealing with the Rendering of the 4 Portals
+void PortalRenderLoop(Shader &mainShader,int shaderIndex[], float signum, Model &model, int modelType, Model &planeModel, GLuint VAO);
+
 // print on console the name of current shader
 void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
@@ -61,7 +64,7 @@ GLboolean spinning = GL_TRUE;
 GLboolean wireframe = GL_FALSE;
 
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{ FULLCOLOR, FLATTEN, NORMAL2COLOR, WAVE, UV2COLOR };
+enum available_ShaderPrograms{ FULLCOLOR, RANDOMNOISE, NORMAL2COLOR,UV2COLOR };
 enum availabe_Models{Bunny, Cube, Sphere};
 // strings with shaders names to print the name of the current one on console
 const char * print_available_ShaderPrograms[] = { "FULLCOLOR", "RANDOMNOISE", "NORMAL2COLOR", "UV2COLOR" };
@@ -82,6 +85,7 @@ GLfloat colorDarkRed[] = {0.35f,0.0f,0.0f};
 GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
 
 // weight and velocity for the animation of Wave shader
+GLfloat currentFrame;
 GLfloat weight = 0.2f;
 GLfloat speed = 5.0f;
 
@@ -94,6 +98,8 @@ glm::vec3 cameraRight;
 glm::vec3 cameraUp;
 glm::mat4 view;
 glm::vec3 lastCameraPos;
+// Projection matrix: FOV angle, aspect ratio, near and far planes
+glm::mat4 projection = glm::perspective(45.0f, (float)screenWidth/(float)screenHeight, 0.1f, 10000.0f);
 
 float horizontalAngle;
 float verticalAngle;
@@ -168,17 +174,16 @@ int main()
     Model cubeModel("models/cube.obj");
     Model sphereModel("models/sphere.obj");
     Model bunnyModel("models/bunny_lp.obj");
+    Model planeModel("models/plane.obj");
+
     //Model david ("../../models/David.obj");
     models.push_back(std::move(bunnyModel));
     models.push_back(std::move(cubeModel));
     models.push_back(std::move(sphereModel));
-    models.push_back(std::move(bunnyModel));
-    //models.push_back(std::move(david));
 
-    Model planeModel("models/plane.obj");
 
-    //Shader for Plain white Plane
-    Shader planeShader("00_basic.vert", "01_fullcolor.frag");
+    
+
 
 ////////////
     // Define Portals by hand 
@@ -218,8 +223,7 @@ int main()
 
     // we set projection and view matrices
     // N.B.) in this case, the camera is fixed -> we set it up outside the rendering loop
-    // Projection matrix: FOV angle, aspect ratio, near and far planes
-    glm::mat4 projection = glm::perspective(45.0f, (float)screenWidth/(float)screenHeight, 0.1f, 10000.0f);
+    
     // View matrix (=camera): position, view direction, camera "up" vector
     cameraPos = glm::vec3(0.0f,0.0f,7.0f);
     lastCameraPos = cameraPos;
@@ -241,10 +245,6 @@ int main()
     glm::mat4 planeModelMatrix = glm::mat4(1.0f);
     glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
 
-    vector<glm::vec3> virtualPos = {glm::vec3(0.0f,0.0f,20.0f), glm::vec3(20.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-20.0f), glm::vec3(-20.0f,0.0f,0.0f)};
-    vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,5.0f), glm::vec3(5.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
-    vector<glm::vec3> PortalRotation = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,1.0f),glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,1.0f)};
-    vector<float> PortalRot = {glm::radians(-90.0f),glm::radians(90.0f),glm::radians(90.0f),glm::radians(-90.0f)};
 
     // Rendering loop: this code is executed at each frame
     while(!glfwWindowShouldClose(window))
@@ -283,184 +283,13 @@ int main()
         glStencilMask(0xFF);
         glClear(GL_STENCIL_BUFFER_BIT);
 
-        for (int i = 0; i < 4; i++)
-        {
-            // Lets do Portals 
-            // Step One: Disable Color and Depth Buffer. Enable Stencil Buffer
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            glDisable(GL_DEPTH_TEST);
-            glEnable(GL_STENCIL_TEST);
+        // temporal shader index Solution
+        int rightFrontShader[] = {FULLCOLOR, RANDOMNOISE};
+        int leftBackShader[] = {NORMAL2COLOR, UV2COLOR};
 
-            glStencilMask(0xFF);
-
-
-
-            // Step Two: Set Stecnil Opereation to increasing when stencil test fails
-            glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
-            glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
-
-
+        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, bunnyModel, Bunny, planeModel, VAO);
+        PortalRenderLoop(mainShader, leftBackShader, 1.0f, bunnyModel, Bunny, planeModel, VAO);
         
-
-            // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and increase the stencil value
-            glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
-            glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
-
-
-
-            // Step Four: Draw Portal Frame
-            //Set up ModelMatrix for the first Plane
-            planeShader.Use();
-            planeModelMatrix = glm::mat4(1.0f);
-            planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
-            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i], PortalRotation[i]);
-            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
-            // and the NormalMatrix
-            planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-            //Send the Matrizes and the color Uniform to our planeShader
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorDarkRed);
-
-            glBindVertexArray(VAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
-
-
-
-            // Step Five: Generate the virtual Camera
-            glm::mat4 virtualCamera =  glm::lookAt(cameraPos + virtualPos[i], cameraPos + virtualPos[i] + cameraView, cameraUp);
-
-
-
-            // Step Six: Disable writing to the Stencil Buffer and Enable Color and Depth Buffer
-            glStencilMask(0x00);
-            glEnable(GL_DEPTH_TEST);
-
-
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-            // Step Seven: Set the stencil func to lEqual with reference value 1. Therefore we draw only on pixels with a stencil value equal to 1
-            // Here is a mistake. We somehow write on pixels we should not write on 
-            glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
-            
-
-
-            // Step Eight: Draw what is inside of the Portal
-            // For example:
-            planeModelMatrix = glm::mat4(1.0f);
-            planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i]+ glm::vec3(0.0f,-1.0f,0.0f));
-            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
-            //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-            // and the NormalMatrix
-            planeNormalMatrix = glm::inverseTranspose(glm::mat3(virtualCamera*planeModelMatrix));
-
-            //Send the Matrizes and the color Uniform to our planeShader
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(virtualCamera));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorDarkRed);
-
-            planeModel.Draw();
-
-            planeModelMatrix = glm::mat4(1.0f);
-            planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, virtualPos[i]+ glm::vec3(0.0f,-0.999f,0.0f));
-            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
-            //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-            // and the NormalMatrix
-            planeNormalMatrix = glm::inverseTranspose(glm::mat3(virtualCamera*planeModelMatrix));
-
-            //Send the Matrizes and the color Uniform to our planeShader
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(virtualCamera));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorSandstone);
-
-            planeModel.Draw();
-
-
-            mainShader.Use();
-            // Here we swap the subroutines in the fragment shader
-            // first search in the shader program the index corresponding to the portal loop
-            GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[i].c_str());
-            // then change the subroutine accordingly
-            glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-
-            ModelMatrix = glm::mat4(1.0f);
-            NormalMatrix = glm::mat3(1.0f);
-            ModelMatrix = glm::translate(ModelMatrix, virtualPos[i]);
-            ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
-            
-
-            // if we cast a mat4 to a mat3, we are automatically considering the upper left 3x3 submatrix
-            NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(virtualCamera));
-            glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
-            glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
-            glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
-
-            models[Bunny].Draw();
-
-
-    
-            // Step Nine: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
-            glDisable(GL_STENCIL_TEST);
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            glDepthMask(GL_TRUE);
-
-
-
-            // STep Ten: CLear the Depth Buffer
-            //glClear(GL_DEPTH_BUFFER_BIT);
-
-
-
-    
-            // Step Eleven: Draw our Portal againg. This time in the Depth Buffer
-            planeShader.Use();
-            //Set up ModelMatrix for the first Plane
-            planeModelMatrix = glm::mat4(1.0f);
-            planeNormalMatrix = glm::mat3(1.0f);
-            planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
-            planeModelMatrix = glm::rotate(planeModelMatrix, PortalRot[i], PortalRotation[i]);
-            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
-            // and the NormalMatrix
-            planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-            //Send the Matrizes and the color Uniform to our planeShader
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-            glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-            glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-            glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorDarkRed);
-
-            glBindVertexArray(VAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
-
-
-
-
-            // Step Twelve: Enable Color Buffer Again
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            //glEnable(GL_STENCIL_TEST);
-            //glStencilMask(0x00);
-            //glStencilFunc(GL_EQUAL, 1, 0xFF);
-
-
-        }
         
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
@@ -472,11 +301,11 @@ int main()
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
 
         //Send the Matrizes and the color Uniform to our planeShader
-        glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorDarkRed);
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
 
         planeModel.Draw();
 
@@ -490,9 +319,9 @@ int main()
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
 
         //Send the Matrizes and the color Uniform to our planeShader
-        glUniformMatrix4fv(glGetUniformLocation(planeShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(planeShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniform3fv(glGetUniformLocation(planeShader.Program, "colorIn"), 1, colorSandstone);
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
 
         planeModel.Draw();
         
@@ -506,7 +335,6 @@ int main()
     // when I exit from the graphics loop, it is because the application is closing
     // we delete the Shader Programs
     mainShader.Delete();
-    planeShader.Delete();
     // we close and delete the created context
     glfwTerminate();
     return 0;
@@ -720,4 +548,155 @@ void ChangeModel()
         else current_Model = current_Model - 1;
         PrintCurrentModel(current_Model);
     }
+}
+
+void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model &model, int modelType, Model &planeModel, GLuint VAO)
+{
+    vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
+    vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
+
+    for (int i = 0; i < 2; i++)
+    {
+        // Lets do Portals 
+        // Step One: Disable Color and Depth Buffer. Enable Stencil Buffer
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
+
+        // Step Two: Set Stecnil Opereation to increasing when stencil test fails
+        glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
+    
+        // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and increase the stencil value
+        glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
+        glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
+
+        // Step Four: Draw Portal Frame
+        // Set up ModelMatrix for the first Plane
+        mainShader.Use();
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+        glm::mat4 planeModelMatrix = glm::mat4(1.0f);
+        glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(signum,signum,signum)*PortalPos[i]);
+        planeModelMatrix = glm::rotate(planeModelMatrix, signum * glm::radians(90.0f), PortalRotationAxis[i]);
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        //Send the Matrizes and the color Uniform to our planeShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+        // Step Five: Generate the virtual Camera
+
+        
+        // Step Six: Disable writing to the Stencil Buffer and Enable Color and Depth Buffer
+        glStencilMask(0x00);
+        glEnable(GL_DEPTH_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        // Step Seven: Set the stencil func to lEqual with reference value 1. Therefore we draw only on pixels with a stencil value equal to 1
+        // Here is a mistake. We somehow write on pixels we should not write on 
+        glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
+        
+        // Step Eight: Draw what is inside of the Portal
+        // For example:
+        planeModelMatrix = glm::mat4(1.0f);
+        planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        //Send the Matrizes and the color Uniform to our planeShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+        planeModel.Draw();
+        planeModelMatrix = glm::mat4(1.0f);
+        planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
+        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        //Send the Matrizes and the color Uniform to our planeShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+        planeModel.Draw();
+
+
+        //mainShader.Use();
+        // Here we swap the subroutines in the fragment shader
+        // first search in the shader program the index corresponding to the portal loop
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex[i]].c_str());
+        // then change the subroutine accordingly
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+
+        glm::mat4 ModelMatrix = glm::mat4(1.0f);
+        glm::mat4 NormalMatrix = glm::mat3(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
+        if (modelType == Bunny)
+            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
+        else
+            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
+        
+        // if we cast a mat4 to a mat3, we are automatically considering the upper left 3x3 submatrix
+        NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
+        models[modelType].Draw();
+
+        // Step Nine: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
+        glDisable(GL_STENCIL_TEST);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDepthMask(GL_TRUE);
+        // STep Ten: CLear the Depth Buffer
+        //glClear(GL_DEPTH_BUFFER_BIT);
+
+        // Step Eleven: Draw our Portal againg. This time in the Depth Buffer
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+        //Set up ModelMatrix for the first Plane
+        planeModelMatrix = glm::mat4(1.0f);
+        planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(signum,signum,signum)*PortalPos[i]);
+        planeModelMatrix = glm::rotate(planeModelMatrix, signum * glm::radians(90.0f), PortalRotationAxis[i]);
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        //Send the Matrizes and the color Uniform to our planeShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+        // Step Twelve: Enable Color Buffer Again
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        //glEnable(GL_STENCIL_TEST);
+        //glStencilMask(0x00);
+        //glStencilFunc(GL_EQUAL, 1, 0xFF);
+    }
+
 }

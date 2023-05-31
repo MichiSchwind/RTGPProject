@@ -18,7 +18,7 @@ subroutine uniform fragShaders FragmentShader;
 
 subroutine(fragShaders) vec4 onecolor()
 {
-    return vec4(1.0f, 0.0f, 0.0f , 1.0f);
+    return vec4(colorIn, 1.0f);
 }
 
 subroutine(fragShaders) vec4 randomNoise()
@@ -29,7 +29,7 @@ subroutine(fragShaders) vec4 randomNoise()
 
 subroutine(fragShaders) vec4 normal2color()
 {
-    return vec4(normalize(N), 1.0f);
+    return vec4(N, 1.0f);
 }
 
 subroutine(fragShaders) vec4 uv2color()

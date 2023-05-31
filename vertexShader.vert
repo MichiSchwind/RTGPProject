@@ -17,7 +17,7 @@ out vec3 N;
 void main() 
 {
     interp_UV = UV;
-    N = normalMatrix * normal; 
+    N = normalize(normalMatrix * normal); 
 
     gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0f);
 }
