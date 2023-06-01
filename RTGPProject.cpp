@@ -29,12 +29,6 @@
 // dimensions of application's window
 GLuint screenWidth = 1200, screenHeight = 900;
 
-/////// This could be redundant
-int room;
-void ChangeRoomShader();
-void ChangeModel();
-
-
 // callback functions for keyboard events
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 
@@ -50,14 +44,17 @@ void SetupShaders(int program);
 GLuint SetupPortal();
 
 // Function dealing with the Rendering of the 4 Portals
-void PortalRenderLoop(Shader &mainShader,int shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO);
+void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO);
+
+// manage the Shader and Modelindices that gets rendering in each Portal
+void ManagePortalContent();
 
 // print on console the name of current shader
 void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
 
 // set the Shader for Model rendered inside the Portals
-void setInsideShader(int rightFrontShader[], int leftBackShader[]);
+void setInsideShader(GLuint rightFrontShader[], GLuint leftBackShader[]);
 
 // parameters for time calculation (for animations)
 GLfloat deltaTime = 0.0f;
@@ -74,16 +71,21 @@ GLboolean spinning = GL_TRUE;
 GLboolean wireframe = GL_FALSE;
 
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{ FULLCOLOR, RANDOMNOISE, NORMAL2COLOR,UV2COLOR };
+enum available_ShaderPrograms{Blue, Red, Yellow, Green,FULLCOLOR, RANDOMNOISE, NORMAL2COLOR,UV2COLOR };
+const int NumShader = 8;
 enum availabe_Models{Bunny, Cube, Sphere};
+const int NumModel = 3;
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "FULLCOLOR", "RANDOMNOISE", "NORMAL2COLOR", "UV2COLOR" };
+const char * print_available_ShaderPrograms[] = { "BLUE", "RED", "YELLOW", "GREEN", "FULLCOLOR", "RANDOMNOISE", "NORMAL2COLOR", "UV2COLOR" };
 const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 
 // index of the current shader (= 0 in the beginning)
-GLuint current_program = FULLCOLOR;
+GLuint currentProgramFrontRight = Blue;
+GLuint currentProgramBackLeft = NORMAL2COLOR;
 GLuint currentProgramInside = FULLCOLOR;
-GLuint current_Model = Bunny;
+GLuint currentModelFrontRight = Bunny;
+GLuint currentModelBackLeft = Sphere;
+GLuint currentModelInside = Bunny;
 
 // a vector for all the Shader Programs used and swapped in the application
 vector<std::string> shader;
@@ -199,7 +201,7 @@ int main()
     GLuint PortalVAO = SetupPortal();
 
     // we print on console the name of the first shader used
-    PrintCurrentShader(current_program);
+    PrintCurrentShader(currentProgramInside);
     
     // View matrix (=camera): position, view direction, camera "up" vector
     cameraPos = glm::vec3(0.0f,0.0f,7.0f);
@@ -237,8 +239,8 @@ int main()
         // Check is an I/O event is happening
         glfwPollEvents();
         Do_Movement();
-        //ChangeRoomShader();
-        //ChangeModel();
+        ManagePortalContent();
+
 
         //Update view Matrix
         view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp); 
@@ -256,15 +258,15 @@ int main()
 
 
         // temporal shader index Solution
-        int rightFrontShader[] = {FULLCOLOR, RANDOMNOISE};
-        int leftBackShader[] = {NORMAL2COLOR, UV2COLOR};
+        GLuint rightFrontShader[] = {currentProgramFrontRight, currentProgramFrontRight+1};
+        GLuint leftBackShader[] = {currentProgramBackLeft, currentProgramBackLeft+1};
 
         // activate the main Shader
         mainShader.Use();
 
         // Render Portals plus what's inside of them
-        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, Bunny, planeModel, PortalVAO);
-        PortalRenderLoop(mainShader, leftBackShader, 1.0f,Bunny, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, currentModelFrontRight, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, leftBackShader, 1.0f,currentModelBackLeft, planeModel, PortalVAO);
         
         
         GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
@@ -311,7 +313,7 @@ int main()
         glm::mat3 NormalMatrix = glm::mat3(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
         ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        if (current_Model == Bunny)
+        if (currentModelInside == Bunny)
             ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
         else
             ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
@@ -325,7 +327,7 @@ int main()
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
         glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
         glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
-        models[current_Model].Draw();
+        models[currentModelInside].Draw();
         
 
         // Swapping back and front buffers
@@ -419,8 +421,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         // "1" to "5" -> ASCII codes from 49 to 57
         // we subtract 48 (= ASCII CODE of "0") to have integers from 1 to 5
         // we subtract 1 to have indices from 0 to 4 in the shaders list
-        current_program = (key-'0'-1);
-        PrintCurrentShader(current_program);
+        currentProgramInside= (key-'0'-1);
+        PrintCurrentShader(currentProgramInside);
     }
 
     //Let the camara "walk" using w,a,s,d
@@ -518,39 +520,41 @@ void Do_Movement()
     }
 }
 
-void ChangeRoomShader() 
+void ManagePortalContent() 
 {
-    if (cameraPos.x < 0.0f && cameraPos.z < -5.0f && lastCameraPos.x > 0 && lastCameraPos.z < -5.0f) 
+    glm::vec3 tempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(cameraPos,1.0f);
+    glm::vec3 lasttempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(lastCameraPos,1.0f);
+
+    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 14.14f && tempRotatetCameraPos.z < 0.0f && lasttempRotatetCameraPos.z >= 0.0f)
     {
-        current_program = (current_program + 1) % 5;
-        PrintCurrentShader(current_program);
+        currentProgramBackLeft += 4;
+        if (currentProgramBackLeft >= NumShader)
+        {
+            currentProgramBackLeft -= NumShader;
+            currentModelBackLeft += 1;
+            if (currentModelBackLeft >= NumModel)
+            {
+                currentModelBackLeft -= NumModel;
+            }
+        }
     }
 
-    if (cameraPos.x > 0.0f && cameraPos.z < -5.0f && lastCameraPos.x < 0 && lastCameraPos.z < -5.0f) 
+    if (-14.14f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && tempRotatetCameraPos.z > 0.0f && lasttempRotatetCameraPos.z <= 0.0f)
     {
-        if(current_program == 0) current_program = 4;
-        else current_program = (current_program - 1) % 5;
-        PrintCurrentShader(current_program);
+        currentProgramFrontRight += 4;
+        if (currentProgramFrontRight >= NumShader)
+        {
+            currentProgramFrontRight -= NumShader;
+            currentModelFrontRight += 1;
+            if (currentModelFrontRight >= NumModel)
+            {
+                currentModelFrontRight -= NumModel;
+            }
+        }
     }
 }
 
-void ChangeModel() 
-{
-    if (cameraPos.x < 0.0f && cameraPos.z > 5.0f && lastCameraPos.x > 0 && lastCameraPos.z > 5.0f) 
-    {
-        current_Model = (current_Model + 1) % 3;
-        PrintCurrentModel(current_Model);
-    }
-
-    if (cameraPos.x > 0.0f && cameraPos.z > 5.0f && lastCameraPos.x < 0 && lastCameraPos.z > 5.0f) 
-    {
-        if(current_Model == 0) current_Model = 2;
-        else current_Model = current_Model - 1;
-        PrintCurrentModel(current_Model);
-    }
-}
-
-void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO)
+void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO)
 {
     vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
     vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
@@ -740,30 +744,34 @@ GLuint SetupPortal()
     return VAO;
 }
 
-void setInsideShader(int rightFrontShader[], int leftBackShader[])
+void setInsideShader(GLuint rightFrontShader[], GLuint leftBackShader[])
 {
-    if(cameraPos.z < 5.1f && std::abs(cameraPos.x) <= 5.0f && lastCameraPos.z > 5.1f)
+    if(cameraPos.z < 5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z > 5.2f)
     {
-        std::cout << "Front" << std::endl;
+
         currentProgramInside = rightFrontShader[0];
+        currentModelInside = currentModelFrontRight;
     }
 
-    if(cameraPos.x < 5.1f && std::abs(cameraPos.z) <= 5.0f && lastCameraPos.x > 5.1f)
+    if(cameraPos.x < 5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x > 5.2f)
     {
         std::cout << "Right" << std::endl;
         currentProgramInside = rightFrontShader[1];
+        currentModelInside = currentModelFrontRight;
     }
 
-    if(cameraPos.z > -5.1f && std::abs(cameraPos.x) <= 5.0f && lastCameraPos.z < -5.1f)
+    if(cameraPos.z > -5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z < -5.2f)
     {
         std::cout << "Back" << std::endl;
         currentProgramInside = leftBackShader[0];
+        currentModelInside = currentModelBackLeft;
     }
     
-    if(cameraPos.x > -5.1f && std::abs(cameraPos.z) <= 5.0f && lastCameraPos.x < -5.1f)
+    if(cameraPos.x > -5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x < -5.2f)
     {
         std::cout << "Left" << std::endl;
         currentProgramInside = leftBackShader[1];
+        currentModelInside = currentModelBackLeft;
     }
 
 }
