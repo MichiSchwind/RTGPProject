@@ -29,18 +29,25 @@
 // dimensions of application's window
 GLuint screenWidth = 1200, screenHeight = 900;
 
+/////// This could be redundant
 int room;
 void ChangeRoomShader();
 void ChangeModel();
 
+
 // callback functions for keyboard events
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
+
+//////// Maybe camera.h?
 void Do_Movement();
 
 void mouse_callback(GLFWwindow* window, double xPos, double yPos);
 
-// setup of Shader Programs for the 5 shaders used in the application
+// setup of Shader Programs - This could be worked on
 void SetupShaders(int program);
+
+// setup VAO for Portal
+GLuint SetupPortal();
 
 // Function dealing with the Rendering of the 4 Portals
 void PortalRenderLoop(Shader &mainShader,int shaderIndex[], float signum, Model &model, int modelType, Model &planeModel, GLuint VAO);
@@ -73,6 +80,7 @@ const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 // index of the current shader (= 0 in the beginning)
 GLuint current_program = FULLCOLOR;
 GLuint current_Model = Bunny;
+
 // a vector for all the Shader Programs used and swapped in the application
 vector<std::string> shader;
 vector<Model> models;
@@ -93,11 +101,13 @@ GLfloat speed = 5.0f;
 bool keys[1024];
 
 glm::vec3 cameraPos;
+glm::vec3 lastCameraPos;
 glm::vec3 cameraView;
 glm::vec3 cameraRight;
 glm::vec3 cameraUp;
 glm::mat4 view;
-glm::vec3 lastCameraPos;
+
+
 // Projection matrix: FOV angle, aspect ratio, near and far planes
 glm::mat4 projection = glm::perspective(45.0f, (float)screenWidth/(float)screenHeight, 0.1f, 10000.0f);
 
@@ -181,48 +191,11 @@ int main()
     models.push_back(std::move(cubeModel));
     models.push_back(std::move(sphereModel));
 
-
-    
-
-
-////////////
-    // Define Portals by hand 
-    GLfloat vertices[] = {
-         1.0f,  0.0f,-1.0f,  // Top Right
-         1.0f,  0.0f, 1.0f,  // Bottom Right
-        -1.0f,  0.0f, 1.0f,  // Bottom Left
-        -1.0f,  0.0f,-1.0f   // Top Left
-    };
-    GLuint indices[] = {  // Note that we start from 0!
-        0, 1, 2,  // First Triangle
-        2, 3, 0   // Second Triangle
-    };
-    GLuint VBO, VAO, EBO;
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    glGenBuffers(1, &EBO);
-    // Bind the Vertex Array Object first, then bind and set vertex buffer(s) and attribute pointer(s).
-    glBindVertexArray(VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0); // Note that this is allowed, the call to glVertexAttribPointer registered VBO as the currently bound vertex buffer object so afterwards we can safely unbind
-
-    glBindVertexArray(0); // Unbind VAO (it's always a good thing to unbind any buffer/array to prevent strange bugs), remember: do NOT unbind the EBO, keep it bound to this VAO
- ////////////
+    // we set up the Portalmesh
+    GLuint PortalVAO = SetupPortal();
 
     // we print on console the name of the first shader used
     PrintCurrentShader(current_program);
-
-    // we set projection and view matrices
-    // N.B.) in this case, the camera is fixed -> we set it up outside the rendering loop
     
     // View matrix (=camera): position, view direction, camera "up" vector
     cameraPos = glm::vec3(0.0f,0.0f,7.0f);
@@ -236,12 +209,9 @@ int main()
     view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp);
 
     // Model and Normal transformation matrices for the objects in the scene: we set to identity
-    glm::mat4 ModelMatrix = glm::mat4(1.0f);
-    glm::mat3 NormalMatrix = glm::mat3(1.0f);
-    //glm::mat4 cubeModelMatrix = glm::mat4(1.0f);
-    //glm::mat3 cubeNormalMatrix = glm::mat3(1.0f);
-    /*glm::mat4 bunnyModelMatrix = glm::mat4(1.0f);
-    glm::mat3 bunnyNormalMatrix = glm::mat3(1.0f);*/
+    //glm::mat4 ModelMatrix = glm::mat4(1.0f);
+    //glm::mat3 NormalMatrix = glm::mat3(1.0f);
+  
     glm::mat4 planeModelMatrix = glm::mat4(1.0f);
     glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
 
@@ -249,6 +219,9 @@ int main()
     // Rendering loop: this code is executed at each frame
     while(!glfwWindowShouldClose(window))
     {
+        // we "clear" the frame and z buffer
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
         // we determine the time passed from the beginning
         // and we calculate time difference between current frame rendering and the previous one
         GLfloat currentFrame = glfwGetTime();
@@ -263,9 +236,6 @@ int main()
 
         //Update view Matrix
         view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp); 
-
-        // we "clear" the frame and z buffer
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         
         // we set the rendering mode
         if (wireframe)
@@ -278,17 +248,17 @@ int main()
         if (spinning)
             orientationY+=(deltaTime*spin_speed);
 
-        glEnable(GL_STENCIL_TEST);
-
-        glStencilMask(0xFF);
-        glClear(GL_STENCIL_BUFFER_BIT);
 
         // temporal shader index Solution
         int rightFrontShader[] = {FULLCOLOR, RANDOMNOISE};
         int leftBackShader[] = {NORMAL2COLOR, UV2COLOR};
 
-        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, bunnyModel, Bunny, planeModel, VAO);
-        PortalRenderLoop(mainShader, leftBackShader, 1.0f, bunnyModel, Bunny, planeModel, VAO);
+        // activate the main Shader
+        mainShader.Use();
+
+        // Render Portals plus what's inside of them
+        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, bunnyModel, Bunny, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, leftBackShader, 1.0f, bunnyModel, Bunny, planeModel, PortalVAO);
         
         
         //Set up ModelMatrix for the first Plane
@@ -564,19 +534,19 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0xFF);
 
+
         // Step Two: Set Stecnil Opereation to increasing when stencil test fails
         glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
         glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
     
+
         // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and increase the stencil value
         glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
         glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
 
+
         // Step Four: Draw Portal Frame
-        // Set up ModelMatrix for the first Plane
-        mainShader.Use();
-        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+        // Set up ModelMatrix and Normalmatrix for the PortalFrame
         glm::mat4 planeModelMatrix = glm::mat4(1.0f);
         glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(signum,signum,signum)*PortalPos[i]);
@@ -584,29 +554,35 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
         // and the NormalMatrix
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-        //Send the Matrizes and the color Uniform to our planeShader
+        
+        //Send the Matrizes and the color Uniform to our mainShader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
 
+        // Draw the Portal
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
-        // Step Five: Generate the virtual Camera
 
         
-        // Step Six: Disable writing to the Stencil Buffer and Enable Color and Depth Buffer
+        // Step Five: Disable writing to the Stencil Buffer and Enable Color and Depth Buffer
         glStencilMask(0x00);
         glEnable(GL_DEPTH_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        // Step Seven: Set the stencil func to lEqual with reference value 1. Therefore we draw only on pixels with a stencil value equal to 1
-        // Here is a mistake. We somehow write on pixels we should not write on 
+
+
+        // Step Six: Set the stencil Function for front facing triangles such that we only draw if the value in the stencil buffer is i+1
         glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
         
-        // Step Eight: Draw what is inside of the Portal
-        // For example:
+
+        // Step Seven: Draw what is inside of the Portal
+        // set the subroutine to FULLCOLOR for the FLoorplanes
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        // we set the Modelmatrix and Normalmatrix for the larger Floorplane
         planeModelMatrix = glm::mat4(1.0f);
         planeNormalMatrix = glm::mat3(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
@@ -614,13 +590,16 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
         // and the NormalMatrix
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-        //Send the Matrizes and the color Uniform to our planeShader
+
+        //Send the Matrizes and the color Uniform to our mainShader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
         planeModel.Draw();
+
+        // we set the Model and Normalmatrix for the smaller Floorplane
         planeModelMatrix = glm::mat4(1.0f);
         planeNormalMatrix = glm::mat3(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
@@ -628,7 +607,8 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
         // and the NormalMatrix
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-        //Send the Matrizes and the color Uniform to our planeShader
+
+        //Send the Matrizes and the color Uniform to our mainShader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
@@ -637,14 +617,13 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         planeModel.Draw();
 
 
-        //mainShader.Use();
         // Here we swap the subroutines in the fragment shader
         // first search in the shader program the index corresponding to the portal loop
         index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex[i]].c_str());
         // then change the subroutine accordingly
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
-
+        // set the Model and Normalmatrix for the model
         glm::mat4 ModelMatrix = glm::mat4(1.0f);
         glm::mat3 NormalMatrix = glm::mat3(1.0f);
         ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
@@ -653,9 +632,9 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
             ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
         else
             ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
-        
-        // if we cast a mat4 to a mat3, we are automatically considering the upper left 3x3 submatrix
         NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
+
+
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
@@ -665,16 +644,13 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
         models[modelType].Draw();
 
-        // Step Nine: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
+        // Step Eight: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
         glDisable(GL_STENCIL_TEST);
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         glDepthMask(GL_TRUE);
-        // STep Ten: CLear the Depth Buffer
-        //glClear(GL_DEPTH_BUFFER_BIT);
 
-        // Step Eleven: Draw our Portal againg. This time in the Depth Buffer
-        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        // Step Nine: Draw our Portal againg. This time in the Depth Buffer
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
         planeNormalMatrix = glm::mat3(1.0f);
@@ -683,7 +659,7 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
         // and the NormalMatrix
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-        //Send the Matrizes and the color Uniform to our planeShader
+        //Send the Matrizes and the color Uniform to our mainSHader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
@@ -692,11 +668,43 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
-        // Step Twelve: Enable Color Buffer Again
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        //glEnable(GL_STENCIL_TEST);
-        //glStencilMask(0x00);
-        //glStencilFunc(GL_EQUAL, 1, 0xFF);
     }
+}
 
+GLuint SetupPortal()
+{
+    // Define Portals by hand 
+    GLfloat vertices[] = {
+         1.0f,  0.0f,-1.0f,  // Top Right
+         1.0f,  0.0f, 1.0f,  // Bottom Right
+        -1.0f,  0.0f, 1.0f,  // Bottom Left
+        -1.0f,  0.0f,-1.0f   // Top Left
+    };
+
+    GLuint indices[] = {  // Note that we start from 0!
+        0, 1, 2,  // First Triangle
+        2, 3, 0   // Second Triangle
+    };
+
+    GLuint VBO, VAO, EBO;
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    // Bind the Vertex Array Object first, then bind and set vertex buffer(s) and attribute pointer(s).
+    glBindVertexArray(VAO); 
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW); 
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);  
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);   
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0); // Note that this is allowed, the call to glVertexAttribPointer registered VBO as the currently bound vertex  buffer object so afterwards we can safely unbind  
+
+    glBindVertexArray(0); // Unbind VAO (it's always a good thing to unbind any buffer/array to prevent strange bugs), remember: do NOT unbind the EBO, keep it bound to this VAO
+
+    return VAO;
 }
