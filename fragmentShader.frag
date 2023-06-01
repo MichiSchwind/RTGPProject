@@ -18,12 +18,12 @@ subroutine uniform fragShaders FragmentShader;
 
 subroutine(fragShaders) vec4 Blue()
 {
-    return vec4(1.0f,0.0f,0.0f, 1.0f);
+    return vec4(0.0f,0.0f,1.0f, 1.0f);
 }
 
 subroutine(fragShaders) vec4 Red()
 {
-    return vec4(0.0f,1.0f,0.0f, 1.0f);
+    return vec4(1.0f,0.0f,0.0f, 1.0f);
 }
 
 subroutine(fragShaders) vec4 Yellow()
@@ -33,7 +33,7 @@ subroutine(fragShaders) vec4 Yellow()
 
 subroutine(fragShaders) vec4 Green()
 {
-    return vec4(0.0f,0.0f,1.0f, 1.0f);
+    return vec4(0.0f,1.0f,0.0f, 1.0f);
 }
 
 subroutine(fragShaders) vec4 onecolor()
