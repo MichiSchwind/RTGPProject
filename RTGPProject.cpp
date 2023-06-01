@@ -50,11 +50,14 @@ void SetupShaders(int program);
 GLuint SetupPortal();
 
 // Function dealing with the Rendering of the 4 Portals
-void PortalRenderLoop(Shader &mainShader,int shaderIndex[], float signum, Model &model, int modelType, Model &planeModel, GLuint VAO);
+void PortalRenderLoop(Shader &mainShader,int shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO);
 
 // print on console the name of current shader
 void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
+
+// set the Shader for Model rendered inside the Portals
+void setInsideShader(int rightFrontShader[], int leftBackShader[]);
 
 // parameters for time calculation (for animations)
 GLfloat deltaTime = 0.0f;
@@ -79,6 +82,7 @@ const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 
 // index of the current shader (= 0 in the beginning)
 GLuint current_program = FULLCOLOR;
+GLuint currentProgramInside = FULLCOLOR;
 GLuint current_Model = Bunny;
 
 // a vector for all the Shader Programs used and swapped in the application
@@ -220,6 +224,8 @@ int main()
     while(!glfwWindowShouldClose(window))
     {
         // we "clear" the frame and z buffer
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
         // we determine the time passed from the beginning
@@ -257,10 +263,12 @@ int main()
         mainShader.Use();
 
         // Render Portals plus what's inside of them
-        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, bunnyModel, Bunny, planeModel, PortalVAO);
-        PortalRenderLoop(mainShader, leftBackShader, 1.0f, bunnyModel, Bunny, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, Bunny, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, leftBackShader, 1.0f,Bunny, planeModel, PortalVAO);
         
         
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
         planeNormalMatrix = glm::mat3(1.0f);
@@ -294,6 +302,30 @@ int main()
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
 
         planeModel.Draw();
+
+        setInsideShader(rightFrontShader,leftBackShader);
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[currentProgramInside].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        glm::mat4 ModelMatrix = glm::mat4(1.0f);
+        glm::mat3 NormalMatrix = glm::mat3(1.0f);
+        ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
+        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
+        if (current_Model == Bunny)
+            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
+        else
+            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
+        NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
+
+
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
+        models[current_Model].Draw();
         
 
         // Swapping back and front buffers
@@ -351,8 +383,6 @@ void SetupShaders(int program)
     } 
 
 }
-
-
 
 //////////////////////////////////////////
 // we print on console the name of the currently used shader
@@ -520,7 +550,7 @@ void ChangeModel()
     }
 }
 
-void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model &model, int modelType, Model &planeModel, GLuint VAO)
+void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO)
 {
     vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
     vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
@@ -669,6 +699,7 @@ void PortalRenderLoop(Shader &mainShader, int shaderIndex[], float signum, Model
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     }
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 }
 
 GLuint SetupPortal()
@@ -707,4 +738,32 @@ GLuint SetupPortal()
     glBindVertexArray(0); // Unbind VAO (it's always a good thing to unbind any buffer/array to prevent strange bugs), remember: do NOT unbind the EBO, keep it bound to this VAO
 
     return VAO;
+}
+
+void setInsideShader(int rightFrontShader[], int leftBackShader[])
+{
+    if(cameraPos.z < 5.1f && std::abs(cameraPos.x) <= 5.0f && lastCameraPos.z > 5.1f)
+    {
+        std::cout << "Front" << std::endl;
+        currentProgramInside = rightFrontShader[0];
+    }
+
+    if(cameraPos.x < 5.1f && std::abs(cameraPos.z) <= 5.0f && lastCameraPos.x > 5.1f)
+    {
+        std::cout << "Right" << std::endl;
+        currentProgramInside = rightFrontShader[1];
+    }
+
+    if(cameraPos.z > -5.1f && std::abs(cameraPos.x) <= 5.0f && lastCameraPos.z < -5.1f)
+    {
+        std::cout << "Back" << std::endl;
+        currentProgramInside = leftBackShader[0];
+    }
+    
+    if(cameraPos.x > -5.1f && std::abs(cameraPos.z) <= 5.0f && lastCameraPos.x < -5.1f)
+    {
+        std::cout << "Left" << std::endl;
+        currentProgramInside = leftBackShader[1];
+    }
+
 }
