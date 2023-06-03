@@ -1,40 +1,39 @@
-# Makefile for RTGP lab lecture exercises - MacOS environment (Intel)
-# author: Davide Gadia
-# Real-Time Graphics Programming - a.a. 2022/2023
-# Master degree in Computer Science
-# Universita' degli Studi di Milano
-
-# name of the file
+# Name der Datei
 FILENAME = RTGPProject
 
-# Xcode compiler
+# Xcode Compiler
 CXX = clang++
 
-# Include path
+# Include-Pfad
 IDIR = include
 
-# Libraries path
+# Bibliotheks-Pfad
 LDIR = libs/mac_intel
 
-# MacOS frameworks
+# MacOS Frameworks
 MACFW = -framework OpenGL -framework IOKit -framework Cocoa -framework CoreVideo
 
-# compiler flags:
-CXXFLAGS  = -g -O0 -x c++ -mmacosx-version-min=11.1 -Wall -Wno-invalid-offsetof -std=c++11 -I$(IDIR)
+# Compiler-Flags:
+CXXFLAGS = -g -O0 -x c++ -mmacosx-version-min=11.1 -Wall -Wno-invalid-offsetof -std=c++11 -I$(IDIR)
 
-# linker flags:
+# Linker-Flags:
 LDFLAGS = -L$(LDIR) -lglfw3 -lassimp -lz -lminizip -lkubazip -lpoly2tri -ldraco -lpugixml $(MACFW)
 
-SOURCES = include/glad/glad.c $(FILENAME).cpp
+# Liste der Quelldateien
+SOURCES = include/glad/glad.c 
 
+# Liste der IMGui Quelldateien
+IMGUI_SOURCES = include/imgui/imgui.cpp include/imgui/imgui_draw.cpp include/imgui/imgui_tables.cpp include/imgui/imgui_widgets.cpp include/imgui/imgui_impl_glfw.cpp include/imgui/imgui_impl_opengl3.cpp $(FILENAME).cpp
 
+# Zielname
 TARGET = $(FILENAME).out
 
-.PHONY : all
-all:
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SOURCES) -o $(TARGET)
+.PHONY: all
+all: $(TARGET)
 
-.PHONY : clean
-clean :
-	-rm $(TARGET)
-	-rm -R $(TARGET).dSYM
+$(TARGET): $(SOURCES) $(IMGUI_SOURCES)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
+
+.PHONY: clean
+clean:
+	rm -f $(TARGET)

@@ -8,7 +8,8 @@
 #include <glad/glad.h>
 
 // GLFW library to create window and to manage I/O
-#include <glfw/glfw3.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 // another check related to OpenGL loader
 // confirm that GLAD didn't include windows.h
@@ -25,6 +26,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
+// Load imgui for the User interface
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_glfw.h"
+#include "imgui/imgui_impl_opengl3.h"
+
+
 
 // dimensions of application's window
 GLuint screenWidth = 1200, screenHeight = 900;
@@ -44,7 +52,7 @@ void SetupShaders(int program);
 GLuint SetupPortal();
 
 // Function dealing with the Rendering of the 4 Portals
-void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO);
+void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO);
 
 // manage the Shader and Modelindices that gets rendering in each Portal
 void ManagePortalContent();
@@ -54,7 +62,11 @@ void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
 
 // set the Shader for Model rendered inside the Portals
-void setInsideShader(GLuint rightFrontShader[], GLuint leftBackShader[]);
+void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader);
+
+//  Function that calls the IMGui if Space is pressed
+void toggleIMGui();
+
 
 // parameters for time calculation (for animations)
 GLfloat deltaTime = 0.0f;
@@ -71,18 +83,18 @@ GLboolean spinning = GL_TRUE;
 GLboolean wireframe = GL_FALSE;
 
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{Blue, Red, Yellow, Green,FULLCOLOR, RANDOMNOISE, NORMAL2COLOR,UV2COLOR };
+enum available_ShaderPrograms{Lambertian, Phong, BlinnPhong, Green, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
 const int NumShader = 8;
 enum availabe_Models{Bunny, Cube, Sphere};
 const int NumModel = 3;
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "BLUE", "RED", "YELLOW", "GREEN", "FULLCOLOR", "RANDOMNOISE", "NORMAL2COLOR", "UV2COLOR" };
+const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "Green", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR"};
 const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 
 // index of the current shader (= 0 in the beginning)
-GLuint currentProgramFrontRight = Blue;
-GLuint currentProgramBackLeft = NORMAL2COLOR;
-GLuint currentProgramInside = FULLCOLOR;
+GLuint currentProgramFrontRight = Lambertian;
+GLuint currentProgramBackLeft = UV2ColorPlusLambertian;
+GLuint currentProgramInside = Lambertian;
 GLuint currentModelFrontRight = Bunny;
 GLuint currentModelBackLeft = Sphere;
 GLuint currentModelInside = Bunny;
@@ -98,13 +110,36 @@ GLfloat colorWhite[] = {0.8f,0.8f,0.8f};
 GLfloat colorDarkRed[] = {0.35f,0.0f,0.0f};
 GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
 
+// Light Informations
+// Light Positions
+GLuint numLights = 4;
+glm::vec3 lightPos[] = {glm::vec3(0.0f,0.0f,5.0f),
+                        glm::vec3(-5.0f,10.0f,0.0f),
+                        glm::vec3(0.0f, 0.0f, -5.0f),
+                        glm::vec3(5.0f, 10.0f, 0.0f)};
+
+// specular and ambient components
+GLfloat specularColor[] = {1.0,1.0,1.0};
+GLfloat ambientColor[] = {0.1,0.1,0.1};
+// weights for the diffusive, specular and ambient components
+GLfloat Kd = 0.8f;
+GLfloat Ks = 0.5f;
+GLfloat Ka = 0.1f;
+// shininess coefficient for Blinn-Phong shader
+GLfloat shininess = 25.0f;
+
+// roughness index for GGX shader
+GLfloat alpha = 0.2f;
+// Fresnel reflectance at 0 degree (Schlik's approximation)
+GLfloat F0 = 0.9f;
+
 // weight and velocity for the animation of Wave shader
 GLfloat currentFrame;
 GLfloat weight = 0.2f;
 GLfloat speed = 5.0f;
 
 //Set up Camera Position and View Direction
-bool keys[1024];
+bool keys[1024] = {0};
 
 glm::vec3 cameraPos;
 glm::vec3 lastCameraPos;
@@ -173,6 +208,14 @@ int main()
     glfwGetFramebufferSize(window, &width, &height);
     glViewport(0, 0, width, height);
 
+    //imgui
+    ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    (void) io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 410");
+
     // we enable Z test
     glEnable(GL_DEPTH_TEST);
 
@@ -184,6 +227,7 @@ int main()
 
     // we create the Shader Programs used in the application
     Shader mainShader("vertexShader.vert", "fragmentSHader.frag");
+    Shader planeShader("00_basic.vert", "01_fullcolor.frag");
     SetupShaders(mainShader.Program);
 
     // we load the model(s) (code of Model class is in include/utils/model.h)
@@ -238,7 +282,10 @@ int main()
 
         // Check is an I/O event is happening
         glfwPollEvents();
+
         Do_Movement();
+        
+
         ManagePortalContent();
 
 
@@ -257,17 +304,27 @@ int main()
             orientationY+=(deltaTime*spin_speed);
 
 
-        // temporal shader index Solution
-        GLuint rightFrontShader[] = {currentProgramFrontRight, currentProgramFrontRight+1};
-        GLuint leftBackShader[] = {currentProgramBackLeft, currentProgramBackLeft+1};
-
         // activate the main Shader
         mainShader.Use();
 
+        // Send the uniforms containing the light information
+        for (GLuint i = 0; i < numLights; i++)
+        {
+            string number = to_string(i);
+            glUniform3fv(glGetUniformLocation(mainShader.Program, ("lights[" + number + "]").c_str()), 1, glm::value_ptr(lightPos[i]));
+        }
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "ambientColor"), 1, ambientColor);
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "specularColor"), 1, specularColor);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "shininess"), shininess);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "alpha"), alpha);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "F0"), F0);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "Ka"), Ka);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "Kd"), Kd);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "Ks"), Ks);
+
         // Render Portals plus what's inside of them
-        PortalRenderLoop(mainShader, rightFrontShader, -1.0f, currentModelFrontRight, planeModel, PortalVAO);
-        PortalRenderLoop(mainShader, leftBackShader, 1.0f,currentModelBackLeft, planeModel, PortalVAO);
-        
+        PortalRenderLoop(mainShader, currentProgramFrontRight, -1.0f, currentModelFrontRight, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, currentProgramBackLeft, 1.0f,currentModelBackLeft, planeModel, PortalVAO);
         
         GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
@@ -305,7 +362,9 @@ int main()
 
         planeModel.Draw();
 
-        setInsideShader(rightFrontShader,leftBackShader);
+        // set the Shader for the Model Inside of the 4 Portals
+        setInsideShader(currentProgramFrontRight,currentProgramBackLeft);
+
         index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[currentProgramInside].c_str());
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
@@ -328,7 +387,8 @@ int main()
         glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
         glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
         models[currentModelInside].Draw();
-        
+
+        toggleIMGui();
 
         // Swapping back and front buffers
         glfwSwapBuffers(window);
@@ -339,6 +399,12 @@ int main()
     // when I exit from the graphics loop, it is because the application is closing
     // we delete the Shader Programs
     mainShader.Delete();
+
+    //Delete the IMGui context
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
     // we close and delete the created context
     glfwTerminate();
     return 0;
@@ -416,7 +482,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         wireframe=!wireframe;
 
     // pressing a key between 1 and 5, we change the shader applied to the models
-    if((key >= GLFW_KEY_1 && key <= GLFW_KEY_5) && action == GLFW_PRESS)
+    if((key >= GLFW_KEY_1 && key <= GLFW_KEY_8) && action == GLFW_PRESS)
     {
         // "1" to "5" -> ASCII codes from 49 to 57
         // we subtract 48 (= ASCII CODE of "0") to have integers from 1 to 5
@@ -461,6 +527,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     {
         keys[GLFW_KEY_D] = false;
     }
+
 }
 
 //Mouse Inputs 
@@ -554,7 +621,7 @@ void ManagePortalContent()
     }
 }
 
-void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex[], float signum, int modelType, Model &planeModel, GLuint VAO)
+void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO)
 {
     vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
     vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
@@ -653,7 +720,7 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex[], float signum, in
 
         // Here we swap the subroutines in the fragment shader
         // first search in the shader program the index corresponding to the portal loop
-        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex[i]].c_str());
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+i].c_str());
         // then change the subroutine accordingly
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
@@ -744,34 +811,50 @@ GLuint SetupPortal()
     return VAO;
 }
 
-void setInsideShader(GLuint rightFrontShader[], GLuint leftBackShader[])
+void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader)
 {
     if(cameraPos.z < 5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z > 5.2f)
     {
-
-        currentProgramInside = rightFrontShader[0];
+        currentProgramInside = rightFrontShader;
         currentModelInside = currentModelFrontRight;
     }
 
     if(cameraPos.x < 5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x > 5.2f)
     {
-        std::cout << "Right" << std::endl;
-        currentProgramInside = rightFrontShader[1];
+        currentProgramInside = rightFrontShader +1;
         currentModelInside = currentModelFrontRight;
     }
 
     if(cameraPos.z > -5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z < -5.2f)
     {
-        std::cout << "Back" << std::endl;
-        currentProgramInside = leftBackShader[0];
+        currentProgramInside = leftBackShader;
         currentModelInside = currentModelBackLeft;
     }
     
     if(cameraPos.x > -5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x < -5.2f)
     {
-        std::cout << "Left" << std::endl;
-        currentProgramInside = leftBackShader[1];
+        currentProgramInside = leftBackShader +1;
         currentModelInside = currentModelBackLeft;
     }
 
+}
+
+
+void toggleIMGui()
+{
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    // ImGUI window creation
+    ImGui::Begin("Settings");
+    // Text that appears in the window
+    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
+                ImGui::GetIO().Framerate);
+    ImGui::Text("Mouse position: (%.5f, %.5f)", lastxPos, lastyPos);
+    ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
+    // Ends of imgui
+    ImGui::End();
+    // Renders the ImGUI elements
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
