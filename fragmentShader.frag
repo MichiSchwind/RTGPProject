@@ -1,12 +1,10 @@
 #version 410 core
 
-#define numLights 4
-
 const float PI = 3.14159265359;
 
 in vec2 interp_UV;
 in vec3 N;
-in vec3 lightDir[numLights];
+in vec3 lightDir;
 in vec3 vViewPosition;
 
 uniform float frequency;
@@ -38,17 +36,13 @@ vec3 LambertianFunc(vec3 diffColor)
 {
     vec3 normal = normalize(N);
 
-    vec3 L[numLights];
+    vec3 L;
     float lambertian = 0;
 
-    for (int i = 0; i< numLights; i++)
-    {
-        L[i] = normalize(lightDir[i]);
+    L = normalize(lightDir);
 
-        lambertian += max(dot(L[i],normal), 0.0);
-    }
+    lambertian += max(dot(L,normal), 0.0);
     
-    lambertian = min(lambertian, 1.0);
 
     // Lambert illumination model
     return vec3(Kd * lambertian * diffColor);
@@ -62,33 +56,31 @@ vec3 PhongFunc(vec3 diffColor)
     // normalization of the per-fragment normal
     vec3 normal = normalize(N);
     
-    for (int i =0; i < numLights; i++)
+
+    // normalization of the per-fragment light incidence direction
+    vec3 L = normalize(lightDir);
+
+    // Lambert coefficient
+    float lambertian = max(dot(L,normal), 0.0);
+
+    // if the lambert coefficient is positive, then I can calculate the specular component
+    if(lambertian > 0.0)
     {
-        // normalization of the per-fragment light incidence direction
-        vec3 L = normalize(lightDir[i]);
+        // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
+        vec3 V = normalize( vViewPosition );
 
-        // Lambert coefficient
-        float lambertian = max(dot(L,normal), 0.0);
+        // reflection vector
+        vec3 R = reflect(-L, N);
 
-        // if the lambert coefficient is positive, then I can calculate the specular component
-        if(lambertian > 0.0)
-        {
-            // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
-            vec3 V = normalize( vViewPosition );
+        // cosine of angle between R and V
+        float specAngle = max(dot(R, V), 0.0);
+        // shininess application to the specular component
+        float specular = pow(specAngle, shininess);
 
-            // reflection vector
-            vec3 R = reflect(-L, N);
-
-            // cosine of angle between R and V
-            float specAngle = max(dot(R, V), 0.0);
-            // shininess application to the specular component
-            float specular = pow(specAngle, shininess);
-
-            // We add diffusive and specular components to the final color
-            // N.B. ): in this implementation, the sum of the components can be different than 1
-            color += vec3( Kd * lambertian * diffColor +
-                            Ks * specular * specularColor);
-        }
+        // We add diffusive and specular components to the final color
+        // N.B. ): in this implementation, the sum of the components can be different than 1
+        color += vec3( Kd * lambertian * diffColor +
+                        Ks * specular * specularColor);
     }
     return color;
 }
@@ -101,33 +93,30 @@ vec3 BlinnPhongFunc(vec3 diffColor)
     // normalization of the per-fragment normal
     vec3 normal = normalize(N);
     
-    for (int i =0; i < numLights; i++)
+    // normalization of the per-fragment light incidence direction
+    vec3 L = normalize(lightDir);
+
+    // Lambert coefficient
+    float lambertian = max(dot(L,normal), 0.0);
+
+    // if the lambert coefficient is positive, then I can calculate the specular component
+    if(lambertian > 0.0)
     {
-        // normalization of the per-fragment light incidence direction
-        vec3 L = normalize(lightDir[i]);
+        // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
+        vec3 V = normalize( vViewPosition );
 
-        // Lambert coefficient
-        float lambertian = max(dot(L,normal), 0.0);
+        // Here we use the half vector, not the reflection vector like in the Phong Model
+        vec3 H = normalize(L + V);
 
-        // if the lambert coefficient is positive, then I can calculate the specular component
-        if(lambertian > 0.0)
-        {
-            // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
-            vec3 V = normalize( vViewPosition );
+        // cosine of angle between R and V
+        float specAngle = max(dot(H, N), 0.0);
+        // shininess application to the specular component
+        float specular = pow(specAngle, shininess);
 
-            // Here we use the half vector, not the reflection vector like in the Phong Model
-            vec3 H = normalize(L + V);
-
-            // cosine of angle between R and V
-            float specAngle = max(dot(H, N), 0.0);
-            // shininess application to the specular component
-            float specular = pow(specAngle, shininess);
-
-            // We add diffusive and specular components to the final color
-            // N.B. ): in this implementation, the sum of the components can be different than 1
-            color += vec3( Kd * lambertian * diffColor +
-                            Ks * specular * specularColor);
-        }
+        // We add diffusive and specular components to the final color
+        // N.B. ): in this implementation, the sum of the components can be different than 1
+        color += vec3( Kd * lambertian * diffColor +
+                        Ks * specular * specularColor);
     }
     return color;
 }
@@ -158,59 +147,55 @@ vec3 GGXFunc(vec3 diffColor)
     // we initialize the final color
     vec3 color = vec3(0.0);
 
-    //for all the lights in the scene
-    for(int i = 0; i < numLights; i++)
+    // normalization of the per-fragment light incidence direction
+    vec3 L = normalize(lightDir);
+
+    // cosine angle between direction of light and normal
+    float NdotL = max(dot(normal, L), 0.0);
+
+    // we initialize the specular component
+    vec3 specular = vec3(0.0);
+
+    // if the cosine of the angle between direction of light and normal is positive, then I can calculate the specular component
+    if(NdotL > 0.0)
     {
-        // normalization of the per-fragment light incidence direction
-        vec3 L = normalize(lightDir[i]);
+        // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
+        vec3 V = normalize( vViewPosition );
 
-        // cosine angle between direction of light and normal
-        float NdotL = max(dot(normal, L), 0.0);
+        // half vector
+        vec3 H = normalize(L + V);
 
-        // we initialize the specular component
-        vec3 specular = vec3(0.0);
+        // we implement the components seen in the slides for a PBR BRDF
+        // we calculate the cosines and parameters to be used in the different components
+        float NdotH = max(dot(N, H), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+        float alpha_Squared = alpha * alpha;
+        float NdotH_Squared = NdotH * NdotH;
 
-        // if the cosine of the angle between direction of light and normal is positive, then I can calculate the specular component
-        if(NdotL > 0.0)
-        {
-            // the view vector has been calculated in the vertex shader, already negated to have direction from the mesh to the camera
-            vec3 V = normalize( vViewPosition );
+        // Geometric factor G2
+        // Smith’s method (uses Schlick-GGX method for both geometry obstruction and shadowing )
+        float G2 = G1(NdotV, alpha)*G1(NdotL, alpha);
 
-            // half vector
-            vec3 H = normalize(L + V);
+        // Rugosity D
+        // GGX Distribution
+        float D = alpha_Squared;
+        float denom = (NdotH_Squared*(alpha_Squared-1.0)+1.0);
+        D /= PI*denom*denom;
 
-            // we implement the components seen in the slides for a PBR BRDF
-            // we calculate the cosines and parameters to be used in the different components
-            float NdotH = max(dot(N, H), 0.0);
-            float NdotV = max(dot(N, V), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-            float alpha_Squared = alpha * alpha;
-            float NdotH_Squared = NdotH * NdotH;
+        // Fresnel reflectance F (approx Schlick)
+        vec3 F = vec3(pow(1.0 - VdotH, 5.0));
+        F *= (1.0 - F0);
+        F += F0;
 
-            // Geometric factor G2
-            // Smith’s method (uses Schlick-GGX method for both geometry obstruction and shadowing )
-            float G2 = G1(NdotV, alpha)*G1(NdotL, alpha);
+        // we put everything together for the specular component
+        specular = (F * G2 * D) / (4.0 * NdotV * NdotL);
 
-            // Rugosity D
-            // GGX Distribution
-            float D = alpha_Squared;
-            float denom = (NdotH_Squared*(alpha_Squared-1.0)+1.0);
-            D /= PI*denom*denom;
-
-            // Fresnel reflectance F (approx Schlick)
-            vec3 F = vec3(pow(1.0 - VdotH, 5.0));
-            F *= (1.0 - F0);
-            F += F0;
-
-            // we put everything together for the specular component
-            specular = (F * G2 * D) / (4.0 * NdotV * NdotL);
-
-            // the rendering equation is:
-            //integral of: BRDF * Li * (cosine angle between N and L)
-            // BRDF in our case is: the sum of Lambert and GGX
-            // Li is considered as equal to 1: light is white, and we have not applied attenuation. With colored lights, and with attenuation, the code must be modified and the Li factor must be multiplied to finalColor
-            color += (lambert + specular)*NdotL;
-        }
+        // the rendering equation is:
+        //integral of: BRDF * Li * (cosine angle between N and L)
+        // BRDF in our case is: the sum of Lambert and GGX
+        // Li is considered as equal to 1: light is white, and we have not applied attenuation. With colored lights, and with attenuation, the code must be modified and the Li factor must be multiplied to finalColor
+        color += (lambert + specular)*NdotL;
     }
     return color;
 }
@@ -222,22 +207,22 @@ subroutine uniform fragShaders FragmentShader;
 
 subroutine(fragShaders) vec4 Lambertian()
 {
-    return vec4(LambertianFunc(vec3(0.0,0.0,1.0)), 1.0f);
+    return vec4(LambertianFunc(colorIn), 1.0f);
 }
 
 subroutine(fragShaders) vec4 Phong()
 {
-    return vec4(PhongFunc(vec3(0.0f,0.0f,1.0f)), 1.0f);
+    return vec4(PhongFunc(colorIn), 1.0f);
 }
 
 subroutine(fragShaders) vec4 BlinnPhong()
 {
-    return vec4(BlinnPhongFunc(vec3(0.0f,0.0f,1.0f)), 1.0f);
+    return vec4(BlinnPhongFunc(colorIn), 1.0f);
 }
 
 subroutine(fragShaders) vec4 GGX()
 {
-    return vec4(GGXFunc(vec3(0.0f,0.0f,1.0f)), 1.0f);
+    return vec4(GGXFunc(colorIn), 1.0f);
 }
 
 subroutine(fragShaders) vec4 normal2ColorPlusLambertian()

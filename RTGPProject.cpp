@@ -51,6 +51,9 @@ void SetupShaders(int program);
 // setup VAO for Portal
 GLuint SetupPortal();
 
+// Function for rendering Objects
+void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int loopIter = 0);
+
 // Function dealing with the Rendering of the 4 Portals
 void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO);
 
@@ -75,7 +78,7 @@ GLfloat lastFrame = 0.0f;
 // rotation angle on Y axis
 GLfloat orientationY = 0.0f;
 // rotation speed on Y axis
-GLfloat spin_speed = 30.0f;
+GLfloat spin_speed = 0.3f;
 // boolean to start/stop animated rotation on Y angle
 GLboolean spinning = GL_TRUE;
 
@@ -112,11 +115,7 @@ GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
 
 // Light Informations
 // Light Positions
-GLuint numLights = 4;
-glm::vec3 lightPos[] = {glm::vec3(0.0f,0.0f,5.0f),
-                        glm::vec3(-5.0f,10.0f,0.0f),
-                        glm::vec3(0.0f, 0.0f, -5.0f),
-                        glm::vec3(5.0f, 10.0f, 0.0f)};
+glm::vec3 lightPos = glm::vec3(0.0f,5.0f,1.5f);
 
 // specular and ambient components
 GLfloat specularColor[] = {1.0,1.0,1.0};
@@ -258,13 +257,6 @@ int main()
     cameraUp = glm::cross(cameraRight, cameraView);
     view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp);
 
-    // Model and Normal transformation matrices for the objects in the scene: we set to identity
-    //glm::mat4 ModelMatrix = glm::mat4(1.0f);
-    //glm::mat3 NormalMatrix = glm::mat3(1.0f);
-  
-    glm::mat4 planeModelMatrix = glm::mat4(1.0f);
-    glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
-
 
     // Rendering loop: this code is executed at each frame
     while(!glfwWindowShouldClose(window))
@@ -283,10 +275,13 @@ int main()
         // Check is an I/O event is happening
         glfwPollEvents();
 
-        Do_Movement();
+        if (!keys[GLFW_KEY_SPACE])
+            Do_Movement();
         
-
+        // Manage the Model and Shader that are rendered in each Portal
         ManagePortalContent();
+        // set the Model and Shader that gets renedered inside the Portalcube
+        setInsideShader(currentProgramFrontRight, currentProgramBackLeft);
 
 
         //Update view Matrix
@@ -301,18 +296,14 @@ int main()
 
         // if animated rotation is activated, then we increment the rotation angle using delta time and the rotation speed parameter
         if (spinning)
-            orientationY+=(deltaTime*spin_speed);
+            lightPos = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(1.0f), glm::vec3(0.0f,1.0f,0.0f))) * lightPos;
 
 
         // activate the main Shader
         mainShader.Use();
 
         // Send the uniforms containing the light information
-        for (GLuint i = 0; i < numLights; i++)
-        {
-            string number = to_string(i);
-            glUniform3fv(glGetUniformLocation(mainShader.Program, ("lights[" + number + "]").c_str()), 1, glm::value_ptr(lightPos[i]));
-        }
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "lightPos"), 1, glm::value_ptr(lightPos));     
         glUniform3fv(glGetUniformLocation(mainShader.Program, "ambientColor"), 1, ambientColor);
         glUniform3fv(glGetUniformLocation(mainShader.Program, "specularColor"), 1, specularColor);
         glUniform1f(glGetUniformLocation(mainShader.Program, "shininess"), shininess);
@@ -326,69 +317,11 @@ int main()
         PortalRenderLoop(mainShader, currentProgramFrontRight, -1.0f, currentModelFrontRight, planeModel, PortalVAO);
         PortalRenderLoop(mainShader, currentProgramBackLeft, 1.0f,currentModelBackLeft, planeModel, PortalVAO);
         
-        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-        //Set up ModelMatrix for the first Plane
-        planeModelMatrix = glm::mat4(1.0f);
-        planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        // Render the Inside of the Portalcube
+        RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel);
 
-        //Send the Matrizes and the color Uniform to our planeShader
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
-
-        planeModel.Draw();
-
-        //Set up ModelMatrix for the second Plane
-        planeModelMatrix = glm::mat4(1.0f);
-        planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-.999f,0.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-        //Send the Matrizes and the color Uniform to our planeShader
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
-
-        planeModel.Draw();
-
-        // set the Shader for the Model Inside of the 4 Portals
-        setInsideShader(currentProgramFrontRight,currentProgramBackLeft);
-
-        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[currentProgramInside].c_str());
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-
-        glm::mat4 ModelMatrix = glm::mat4(1.0f);
-        glm::mat3 NormalMatrix = glm::mat3(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        if (currentModelInside == Bunny)
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
-        else
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
-        NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
-
-
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
-        glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
-        glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
-        models[currentModelInside].Draw();
-
-        toggleIMGui();
+        if (keys[GLFW_KEY_SPACE])
+            toggleIMGui();
 
         // Swapping back and front buffers
         glfwSwapBuffers(window);
@@ -528,39 +461,57 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         keys[GLFW_KEY_D] = false;
     }
 
+    if(key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+    {
+        keys[GLFW_KEY_SPACE] = !keys[GLFW_KEY_SPACE];
+
+        if (keys[GLFW_KEY_SPACE])
+        {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            firstMouse = true;
+        }
+        else
+        {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
+    }
 }
 
 //Mouse Inputs 
 void mouse_callback(GLFWwindow* window, double xPos, double yPos)
-{
-    if (firstMouse)
+{   
+    if (!keys[GLFW_KEY_SPACE])
     {
-        lastyPos = yPos;
+        glfwGetCursorPos(window, &xPos, &yPos);
+
+        if (firstMouse)
+        {
+            lastyPos = yPos;
+            lastxPos = xPos;
+            firstMouse = false;
+        }
+        
+        int height, width;
+        glfwGetWindowSize(window, &height, &width);
+        horizontalAngle = horizontalAngle + 0.1f * deltaTime * float(lastxPos - xPos);
+        verticalAngle = verticalAngle + 0.1f * deltaTime * float(lastyPos - yPos);
         lastxPos = xPos;
-        firstMouse = false;
-    }
-    glfwGetCursorPos(window, &xPos, &yPos);
-    int height, width;
-    glfwGetWindowSize(window, &height, &width);
-    horizontalAngle = horizontalAngle + 0.1f * deltaTime * float(lastxPos - xPos);
-    verticalAngle = verticalAngle + 0.1f * deltaTime * float(lastyPos - yPos);
-    lastxPos = xPos;
-    lastyPos = yPos;
+        lastyPos = yPos;
 
-    if (verticalAngle > 1.57f)
-    {
-        verticalAngle = 1.57f;
-    }
-    if (verticalAngle < -1.57f)
-    {
-        verticalAngle = -1.57f;
-    }
+        if (verticalAngle > 1.57f)
+        {
+            verticalAngle = 1.57f;
+        }
+        if (verticalAngle < -1.57f)
+        {
+            verticalAngle = -1.57f;
+        }
 
-    // use glm::Radians to avoid turning the camera upside down i guess
-    cameraView = glm::normalize(glm::vec3(cos(verticalAngle) * sin(horizontalAngle), sin(verticalAngle), cos(verticalAngle)*cos(horizontalAngle)));
-    cameraRight = glm::normalize(glm::vec3(sin(horizontalAngle - 3.14f/2.0f), 0, cos(horizontalAngle - 3.14f/2.0f)));
-    cameraUp = glm::cross(cameraRight, cameraView);
-
+        // use glm::Radians to avoid turning the camera upside down i guess
+        cameraView = glm::normalize(glm::vec3(cos(verticalAngle) * sin(horizontalAngle), sin(verticalAngle), cos(verticalAngle)*cos(horizontalAngle)));
+        cameraRight = glm::normalize(glm::vec3(sin(horizontalAngle - 3.14f/2.0f), 0, cos(horizontalAngle - 3.14f/2.0f)));
+        cameraUp = glm::cross(cameraRight, cameraView);
+    }
 }
 
 void Do_Movement()
@@ -679,71 +630,7 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int 
         
 
         // Step Seven: Draw what is inside of the Portal
-        // set the subroutine to FULLCOLOR for the FLoorplanes
-        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-
-        // we set the Modelmatrix and Normalmatrix for the larger Floorplane
-        planeModelMatrix = glm::mat4(1.0f);
-        planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-        //Send the Matrizes and the color Uniform to our mainShader
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
-        planeModel.Draw();
-
-        // we set the Model and Normalmatrix for the smaller Floorplane
-        planeModelMatrix = glm::mat4(1.0f);
-        planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-        //Send the Matrizes and the color Uniform to our mainShader
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
-        planeModel.Draw();
-
-
-        // Here we swap the subroutines in the fragment shader
-        // first search in the shader program the index corresponding to the portal loop
-        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+i].c_str());
-        // then change the subroutine accordingly
-        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-
-        // set the Model and Normalmatrix for the model
-        glm::mat4 ModelMatrix = glm::mat4(1.0f);
-        glm::mat3 NormalMatrix = glm::mat3(1.0f);
-        ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
-        ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
-        if (modelType == Bunny)
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
-        else
-            ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
-        NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
-
-
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
-        glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
-        glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
-        models[modelType].Draw();
+        RenderObjects(mainShader, shaderIndex, modelType, planeModel, i);
 
         // Step Eight: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
         glDisable(GL_STENCIL_TEST);
@@ -836,9 +723,7 @@ void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader)
         currentProgramInside = leftBackShader +1;
         currentModelInside = currentModelBackLeft;
     }
-
 }
-
 
 void toggleIMGui()
 {
@@ -848,6 +733,8 @@ void toggleIMGui()
     // ImGUI window creation
     ImGui::Begin("Settings");
     // Text that appears in the window
+    ImGui::ColorEdit4("Set Color", myColor);
+
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
                 ImGui::GetIO().Framerate);
     ImGui::Text("Mouse position: (%.5f, %.5f)", lastxPos, lastyPos);
@@ -857,4 +744,73 @@ void toggleIMGui()
     // Renders the ImGUI elements
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int loopIter)
+{
+    // set the subroutine to FULLCOLOR for the FLoorplanes
+    GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+    // we set the Modelmatrix and Normalmatrix for the larger Floorplane
+    glm::mat4 planeModelMatrix = glm::mat4(1.0f);
+    glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
+    planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
+    planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+    //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+    // and the NormalMatrix
+    planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+
+    //Send the Matrizes and the color Uniform to our mainShader
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+    glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+    planeModel.Draw();
+
+
+    // we set the Model and Normalmatrix for the smaller Floorplane
+    planeModelMatrix = glm::mat4(1.0f);
+    planeNormalMatrix = glm::mat3(1.0f);
+    planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
+    planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
+    //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+    // and the NormalMatrix
+    planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+
+    //Send the Matrizes and the color Uniform to our mainShader
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+    glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+    planeModel.Draw();
+
+
+    // Here we swap the subroutines in the fragment shader
+    // first search in the shader program the index corresponding to the portal loop
+    index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+loopIter].c_str());
+    // then change the subroutine accordingly
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+    // set the Model and Normalmatrix for the model
+    glm::mat4 ModelMatrix = glm::mat4(1.0f);
+    glm::mat3 NormalMatrix = glm::mat3(1.0f);
+    ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
+    //ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
+    if (modelType == Bunny)
+        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
+    else
+        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
+    NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
+
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
+    glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
+    glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
+    glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
+    models[modelType].Draw();
 }
