@@ -13,11 +13,13 @@ uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;
+uniform mat4 lightSpaceMatrix;
 
 out vec2 interp_UV;
 out vec3 N;
 out vec3 lightDir;
 out vec3 vViewPosition;
+out vec4 posLightSpace;
 
 void main() 
 {
@@ -33,4 +35,6 @@ void main()
     vViewPosition = -posInViewCoords.xyz;
 
     gl_Position = projectionMatrix * posInViewCoords;
+
+    posLightSpace = lightSpaceMatrix * modelMatrix * vec4(position, 1.0f);
 }

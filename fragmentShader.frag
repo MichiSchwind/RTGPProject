@@ -6,6 +6,7 @@ in vec2 interp_UV;
 in vec3 N;
 in vec3 lightDir;
 in vec3 vViewPosition;
+in vec4 posLightSpace;
 
 uniform float frequency;
 uniform float power;
@@ -29,7 +30,50 @@ uniform float shininess;
 uniform float alpha; // rugosity - 0 : smooth, 1: rough
 uniform float F0; // fresnel reflectance at normal incidence
 
+uniform sampler2D shadowMap;
+
 out vec4 colorFrag;
+
+
+float Shadow() // this name is the one which is detected by the SetupShaders() function in the main application, and the one used to swap subroutines
+{
+    // given the fragment position in light coordinates, we apply the perspective divide. Usually, perspective divide is applied in an automatic way to the coordinates saved in the gl_Position variable. In this case, the vertex position in light coordinates has been saved in a separate variable, so we need to do it manually
+    vec3 projCoords = posLightSpace.xyz / posLightSpace.w;
+    // after the perspective divide the values are in the range [-1,1]: we must convert them in [0,1]
+    projCoords = projCoords * 0.5 + 0.5;
+
+    // we get the depth of current fragment from light's perspective
+    float currentDepth = projCoords.z;
+
+    // we calculate an adaptive bias to apply to the currentDepth value, to avoid the shadow acne effect.
+    // the bias value is in the range [0.005,0.05]: the final value is calculated considering the angle between the normal and the direction of light
+    vec3 normal = normalize(N);
+    float bias = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
+
+    // Version 3: we apply Percentage Close Filtering (PCF) to smooth shadow edges
+    float shadow = 0.0;
+    // we determine the texel dimension
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    // we sample the depth map considering the 3x3 neighbourhood of the current fragment, and we apply the same test of Version 2 to each sample
+    for(int x = -1; x <= 1; ++x)
+    {
+        for(int y = -1; y <= 1; ++y)
+        {
+            // we sample the depth map
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            // if the depth (with bias) of the current fragment is greater than the depth in the shadow map, then the fragment is in shadow. We add the result to the shadow variable
+            shadow += currentDepth - bias > pcfDepth  ? 1.0 : 0.0;
+        }
+    }
+    // we average the shadow result on the kernel size of the PCF
+    shadow /= 9.0;
+
+    // To avoid that the areas behind the far plane of the light frustum are considered in shadow, we set their shadow value to 0 (= in light)
+    if(projCoords.z > 1.0)
+        shadow = 0.0;
+
+    return shadow;
+}
 
 // We define the different Light Models as functions. This gives us the option to combine them
 vec3 LambertianFunc(vec3 diffColor)
@@ -205,24 +249,32 @@ subroutine vec4 fragShaders();
 
 subroutine uniform fragShaders FragmentShader;
 
-subroutine(fragShaders) vec4 Lambertian()
+subroutine(fragShaders) vec4 LambertianPlusShadow()
 {
-    return vec4(LambertianFunc(colorIn), 1.0f);
+    float shadow = Shadow();
+    vec3 color = LambertianFunc(colorIn);
+    return vec4(color, 1.0f);
 }
 
-subroutine(fragShaders) vec4 Phong()
+subroutine(fragShaders) vec4 PhongPlusShadw()
 {
-    return vec4(PhongFunc(colorIn), 1.0f);
+    float shadow = Shadow();
+    vec3 color = PhongFunc(colorIn);
+    return vec4((1.0 - shadow) * color, 1.0f);
 }
 
-subroutine(fragShaders) vec4 BlinnPhong()
+subroutine(fragShaders) vec4 BlinnPhongPlusShadow()
 {
-    return vec4(BlinnPhongFunc(colorIn), 1.0f);
+    float shadow = Shadow();
+    vec3 color = BlinnPhongFunc(colorIn);
+    return vec4((1.0 - shadow) * color, 1.0f);
 }
 
-subroutine(fragShaders) vec4 GGX()
+subroutine(fragShaders) vec4 GGXPlusShadow()
 {
-    return vec4(GGXFunc(colorIn), 1.0f);
+    float shadow = Shadow();
+    vec3 color = GGXFunc(colorIn);
+    return vec4((1.0 - shadow) * color, 1.0f);
 }
 
 subroutine(fragShaders) vec4 normal2ColorPlusLambertian()
@@ -248,7 +300,8 @@ subroutine(fragShaders) vec4 uv2ColorPlusBlinnPhong()
 
 subroutine(fragShaders) vec4 FULLCOLOR()
 {
-    return vec4(colorIn, 1.0);
+    float shadow = Shadow();
+    return vec4((1.0 - shadow) * colorIn, 1.0);
 }
 
 

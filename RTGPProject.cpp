@@ -52,10 +52,10 @@ void SetupShaders(int program);
 GLuint SetupPortal();
 
 // Function for rendering Objects
-void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int loopIter = 0);
+void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int render_pass, int loopIter = 0);
 
 // Function dealing with the Rendering of the 4 Portals
-void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO);
+void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO, int render_pass);
 
 // manage the Shader and Modelindices that gets rendering in each Portal
 void ManagePortalContent();
@@ -78,26 +78,27 @@ GLfloat lastFrame = 0.0f;
 // rotation angle on Y axis
 GLfloat orientationY = 0.0f;
 // rotation speed on Y axis
-GLfloat spin_speed = 0.3f;
+GLfloat spinspeed = 0.5f;
 // boolean to start/stop animated rotation on Y angle
 GLboolean spinning = GL_TRUE;
 
 // boolean to activate/deactivate wireframe rendering
 GLboolean wireframe = GL_FALSE;
 
+enum render_passes{ SHADOWMAP, RENDER};
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{Lambertian, Phong, BlinnPhong, Green, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
-const int NumShader = 8;
+enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
+const int NumShader = 4;
 enum availabe_Models{Bunny, Cube, Sphere};
 const int NumModel = 3;
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "Green", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR"};
+const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR"};
 const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
 
 // index of the current shader (= 0 in the beginning)
-GLuint currentProgramFrontRight = Lambertian;
-GLuint currentProgramBackLeft = UV2ColorPlusLambertian;
-GLuint currentProgramInside = Lambertian;
+GLuint currentProgramFrontRight = LambertianPlusShadow;
+GLuint currentProgramBackLeft = BlinnPhongPlusShadow;
+GLuint currentProgramInside = LambertianPlusShadow;
 GLuint currentModelFrontRight = Bunny;
 GLuint currentModelBackLeft = Sphere;
 GLuint currentModelInside = Bunny;
@@ -115,7 +116,9 @@ GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
 
 // Light Informations
 // Light Positions
-glm::vec3 lightPos = glm::vec3(0.0f,5.0f,1.5f);
+glm::vec3 lightPos = glm::vec3(0.0f,2.0f,4.0f);
+glm::vec3 lightRight = glm::vec3(0.0f,0.0f,-1.0f);
+glm::vec3 lightPointsTo = glm::vec3(1.0f,1.0f,1.0f);
 
 // specular and ambient components
 GLfloat specularColor[] = {1.0,1.0,1.0};
@@ -157,6 +160,7 @@ float lastxPos;
 float lastyPos;
 bool firstMouse;
 
+GLuint depthMap[3];
 
 /////////////////// MAIN function ///////////////////////
 int main()
@@ -226,7 +230,8 @@ int main()
 
     // we create the Shader Programs used in the application
     Shader mainShader("vertexShader.vert", "fragmentSHader.frag");
-    Shader planeShader("00_basic.vert", "01_fullcolor.frag");
+    Shader shadowShader("19_shadowmap.vert", "20_shadowmap.frag");
+    //Shader planeShader("00_basic.vert", "01_fullcolor.frag");
     SetupShaders(mainShader.Program);
 
     // we load the model(s) (code of Model class is in include/utils/model.h)
@@ -257,15 +262,45 @@ int main()
     cameraUp = glm::cross(cameraRight, cameraView);
     view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp);
 
+    /////////////////// CREATION OF BUFFER FOR THE  DEPTH MAP /////////////////////////////////////////
+    // buffer dimension: too large -> performance may slow down if we have many lights; too small -> strong aliasing
+    const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+    GLuint depthMapFBO[3];
+    for (int i =0 ;  i < 3; i++) 
+    {
+        // we create a Frame Buffer Object: the first rendering step will render to this buffer, and not to the real frame buffer
+        glGenFramebuffers(1, &depthMapFBO[i]);
+        // we create a texture for the depth map
+        glGenTextures(1, &depthMap[i]);
+        glBindTexture(GL_TEXTURE_2D, depthMap[i]);
+        // in the texture, we will save only the depth data of the fragments. Thus, we specify that we need to render only depth in the first rendering     step
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        // we set to clamp the uv coordinates outside [0,1] to the color of the border
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+        // outside the area covered by the light frustum, everything is rendered in shadow (because we set GL_CLAMP_TO_BORDER)
+        // thus, we set the texture border to white, so to render correctly everything not involved by the shadow map
+        //*************
+        GLfloat borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+        // we bind the depth map FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap[i], 0);
+        // we set that we are not calculating nor saving color data
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    ///////////////////////////////////////////////////////////////////
+
 
     // Rendering loop: this code is executed at each frame
     while(!glfwWindowShouldClose(window))
     {
-        // we "clear" the frame and z buffer
-        glEnable(GL_STENCIL_TEST);
-        glStencilMask(0xFF);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
         // we determine the time passed from the beginning
         // and we calculate time difference between current frame rendering and the previous one
         GLfloat currentFrame = glfwGetTime();
@@ -296,14 +331,54 @@ int main()
 
         // if animated rotation is activated, then we increment the rotation angle using delta time and the rotation speed parameter
         if (spinning)
-            lightPos = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(1.0f), glm::vec3(0.0f,1.0f,0.0f))) * lightPos;
+            lightPos = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightPos;
+            lightRight = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightRight;
+
+
+        /////////////////// STEP 1 - SHADOW MAP: RENDERING OF SCENE FROM LIGHT POINT OF VIEW ////////////////////////////////////////////////
+        // we set view and projection matrix for the rendering using light as a camera
+        glm::mat4 lightProjection, lightView;
+        glm::mat4 lightSpaceMatrix;
+        // for a directional light, the projection is orthographic. For point lights, we should use a perspective projection
+        lightProjection = glm::perspective(glm::radians(80.0f), 1.0f, 2.0f, 50.0f);
+        // the light is directional, so technically it has no position. We need a view matrix, so we consider a position on the the directionvector    of the light
+        lightView = glm::lookAt(lightPos, lightPointsTo, glm::normalize(glm::cross(lightPointsTo, lightRight)));
+        // transformation matrix for the light
+        lightSpaceMatrix = lightProjection * lightView;
+        /// We "install" the  Shader Program for the shadow mapping creation
+        shadowShader.Use();
+        // we pass the transformation matrix as uniform
+        glUniformMatrix4fv(glGetUniformLocation(shadowShader.Program, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+        // we set the viewport for the first rendering step = dimensions of the depth texture
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+
+        for (int i:{currentModelFrontRight, currentModelBackLeft})
+        {
+            // we activate the FBO for the depth map rendering
+            glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO[i]);
+            glClear(GL_DEPTH_BUFFER_BIT);
+
+            // we render the scene, using the shadow shader
+
+            // Render the Inside of the Portalcube
+            RenderObjects(shadowShader, 0, i, planeModel, SHADOWMAP);
+        }
+
+        /////// MAIN RENDERING LOOP /////////
+        // we "clear" the frame and z buffer
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, width, height);
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 
         // activate the main Shader
         mainShader.Use();
 
         // Send the uniforms containing the light information
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "lightPos"), 1, glm::value_ptr(lightPos));     
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "lightPos"), 1, glm::value_ptr(lightPos));    
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix)); 
         glUniform3fv(glGetUniformLocation(mainShader.Program, "ambientColor"), 1, ambientColor);
         glUniform3fv(glGetUniformLocation(mainShader.Program, "specularColor"), 1, specularColor);
         glUniform1f(glGetUniformLocation(mainShader.Program, "shininess"), shininess);
@@ -314,11 +389,11 @@ int main()
         glUniform1f(glGetUniformLocation(mainShader.Program, "Ks"), Ks);
 
         // Render Portals plus what's inside of them
-        PortalRenderLoop(mainShader, currentProgramFrontRight, -1.0f, currentModelFrontRight, planeModel, PortalVAO);
-        PortalRenderLoop(mainShader, currentProgramBackLeft, 1.0f,currentModelBackLeft, planeModel, PortalVAO);
+        PortalRenderLoop(mainShader, currentProgramFrontRight, -1.0f, currentModelFrontRight, planeModel, PortalVAO, RENDER);
+        PortalRenderLoop(mainShader, currentProgramBackLeft, 1.0f,currentModelBackLeft, planeModel, PortalVAO, RENDER);
         
         // Render the Inside of the Portalcube
-        RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel);
+        RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel, RENDER);
 
         if (keys[GLFW_KEY_SPACE])
             toggleIMGui();
@@ -572,7 +647,7 @@ void ManagePortalContent()
     }
 }
 
-void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO)
+void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO, int render_pass)
 {
     vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
     vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
@@ -630,7 +705,7 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int 
         
 
         // Step Seven: Draw what is inside of the Portal
-        RenderObjects(mainShader, shaderIndex, modelType, planeModel, i);
+        RenderObjects(mainShader, shaderIndex + i, modelType, planeModel, render_pass);
 
         // Step Eight: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
         glDisable(GL_STENCIL_TEST);
@@ -746,8 +821,16 @@ void toggleIMGui()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int loopIter)
+void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int render_pass, int loopIter)
 {
+    if (render_pass==RENDER)
+    {
+        glActiveTexture(GL_TEXTURE0 + modelType);
+        glBindTexture(GL_TEXTURE_2D, depthMap[modelType]);
+        GLint shadowLocation = glGetUniformLocation(mainShader.Program, "shadowMap");
+        glUniform1i(shadowLocation, modelType);
+    }
+
     // set the subroutine to FULLCOLOR for the FLoorplanes
     GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
