@@ -7,6 +7,7 @@ in vec3 N;
 in vec3 lightDir;
 in vec3 vViewPosition;
 in vec4 posLightSpace;
+in vec4 screenPos;
 
 uniform float frequency;
 uniform float power;
@@ -31,9 +32,17 @@ uniform float alpha; // rugosity - 0 : smooth, 1: rough
 uniform float F0; // fresnel reflectance at normal incidence
 
 uniform sampler2D shadowMap;
+uniform sampler2D meshTexture;
 
 out vec4 colorFrag;
 
+vec3 getMeshColor()
+{
+    
+    vec3 color = texture(meshTexture, interp_UV).rgb;
+
+    return color;
+}
 
 float Shadow() // this name is the one which is detected by the SetupShaders() function in the main application, and the one used to swap subroutines
 {
@@ -252,8 +261,8 @@ subroutine uniform fragShaders FragmentShader;
 subroutine(fragShaders) vec4 LambertianPlusShadow()
 {
     float shadow = Shadow();
-    vec3 color = LambertianFunc(colorIn);
-    return vec4(color, 1.0f);
+    vec3 color = getMeshColor();
+    return vec4((1.0-shadow)*LambertianFunc(color), 1.0f);
 }
 
 subroutine(fragShaders) vec4 PhongPlusShadw()

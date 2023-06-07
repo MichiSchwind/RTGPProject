@@ -70,6 +70,9 @@ void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader);
 //  Function that calls the IMGui if Space is pressed
 void toggleIMGui();
 
+// Function for creating VAO and VBO in order to draw a point
+void drawPoint(GLuint framebuffer);
+
 
 // parameters for time calculation (for animations)
 GLfloat deltaTime = 0.0f;
@@ -85,7 +88,7 @@ GLboolean spinning = GL_TRUE;
 // boolean to activate/deactivate wireframe rendering
 GLboolean wireframe = GL_FALSE;
 
-enum render_passes{ SHADOWMAP, RENDER};
+enum render_passes{ SHADOWMAP, RENDER, BAKE};
 // enum data structure to manage indices for shaders swapping
 enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
 const int NumShader = 4;
@@ -153,14 +156,29 @@ glm::mat4 view;
 
 // Projection matrix: FOV angle, aspect ratio, near and far planes
 glm::mat4 projection = glm::perspective(45.0f, (float)screenWidth/(float)screenHeight, 0.1f, 10000.0f);
+glm::mat4 OrthoProj = glm::ortho(0,1,0,1,-1,1);
 
 float horizontalAngle;
 float verticalAngle;
+float mouseX;
+float mouseY;
 float lastxPos;
 float lastyPos;
 bool firstMouse;
 
 GLuint depthMap[3];
+GLuint meshTexture;
+GLuint paintTexture;
+GLuint bakeShadowMap;
+GLfloat pointSize = 15.0f;
+std::vector<float> mouseHist;
+GLint numMousePoints;
+
+glm::vec3 brushColor = glm::vec3(0.0f,1.0f,0.0f);
+
+bool bake = false;
+
+
 
 /////////////////// MAIN function ///////////////////////
 int main()
@@ -225,12 +243,17 @@ int main()
     // we enable face culling - this is important for the portals
     glEnable(GL_CULL_FACE);
 
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glEnable(GL_LINE_SMOOTH);
+
     //the "clear" color for the frame buffer
     glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
 
     // we create the Shader Programs used in the application
     Shader mainShader("vertexShader.vert", "fragmentSHader.frag");
     Shader shadowShader("19_shadowmap.vert", "20_shadowmap.frag");
+    Shader drawingShader("Drawing.vert", "Drawing.frag");
+    Shader bakeShader("bakeShader.vert", "bakeShader.frag");
     //Shader planeShader("00_basic.vert", "01_fullcolor.frag");
     SetupShaders(mainShader.Program);
 
@@ -274,7 +297,7 @@ int main()
         glGenTextures(1, &depthMap[i]);
         glBindTexture(GL_TEXTURE_2D, depthMap[i]);
         // in the texture, we will save only the depth data of the fragments. Thus, we specify that we need to render only depth in the first rendering     step
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH,  SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         // we set to clamp the uv coordinates outside [0,1] to the color of the border
@@ -296,7 +319,86 @@ int main()
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
     ///////////////////////////////////////////////////////////////////
+    std::vector<GLubyte> whiteTextureData( 4 *screenWidth *  screenHeight * 3, 255);
+    //////////////////Creation of the drawing Buffer///////////////////
+    GLuint paintTextureFBO;
+    
+    glGenFramebuffers(1, &paintTextureFBO);
 
+    glGenTextures(1, &paintTexture);
+    glBindTexture(GL_TEXTURE_2D, paintTexture);
+
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB,  2 * screenWidth,  2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+    GLfloat borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    //glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, paintTextureFBO);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, paintTexture, 0);
+    
+    glDrawBuffer(GL_FRONT_AND_BACK);
+    glReadBuffer(GL_FRONT_AND_BACK);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+
+    GLuint bakeFramebuffer;
+
+    glGenFramebuffers(1, &bakeFramebuffer);
+    //// and the bake Texture
+    glGenTextures(1, &meshTexture);
+    glBindTexture(GL_TEXTURE_2D, meshTexture);
+
+    
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 2 *  screenWidth, 2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, whiteTextureData.data());
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, bakeFramebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, meshTexture, 0);
+
+    glDrawBuffer(GL_FRONT_AND_BACK);
+    glReadBuffer(GL_FRONT_AND_BACK);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    GLuint bakeShadowMapFBO;
+
+    glGenFramebuffers(1, &bakeShadowMapFBO);
+    
+    
+    glGenTextures(1, &bakeShadowMap);
+    glBindTexture(GL_TEXTURE_2D, bakeShadowMap);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,  2 * screenWidth, 2 * screenHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, bakeShadowMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, bakeShadowMap, 0);
+
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+    ///////////////////////////////////////////////////////////////////
 
     // Rendering loop: this code is executed at each frame
     while(!glfwWindowShouldClose(window))
@@ -330,10 +432,11 @@ int main()
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         // if animated rotation is activated, then we increment the rotation angle using delta time and the rotation speed parameter
-        if (spinning)
+        if (spinning && !keys[GLFW_KEY_SPACE])
+        {
             lightPos = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightPos;
             lightRight = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightRight;
-
+        }
 
         /////////////////// STEP 1 - SHADOW MAP: RENDERING OF SCENE FROM LIGHT POINT OF VIEW ////////////////////////////////////////////////
         // we set view and projection matrix for the rendering using light as a camera
@@ -363,11 +466,14 @@ int main()
             // Render the Inside of the Portalcube
             RenderObjects(shadowShader, 0, i, planeModel, SHADOWMAP);
         }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, width, height);
+
+
+
 
         /////// MAIN RENDERING LOOP /////////
         // we "clear" the frame and z buffer
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, width, height);
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0xFF);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -395,8 +501,49 @@ int main()
         // Render the Inside of the Portalcube
         RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel, RENDER);
 
-        if (keys[GLFW_KEY_SPACE])
+        ////////////////////////Drawing Buffer//////////////////////
+        if (keys[GLFW_KEY_SPACE]) 
+        {
+            if (keys[GLFW_KEY_E])
+            {
+                drawingShader.Use();
+                glUniform1f(glGetUniformLocation(drawingShader.Program, "pointSize"), pointSize);
+                glUniform3fv(glGetUniformLocation(drawingShader.Program, "colorIn"), 1, glm::value_ptr(brushColor));
+
+                drawPoint(paintTextureFBO);
+                bake = true;
+            }
+            else if (bake)
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, bakeShadowMapFBO);
+                glClear(GL_DEPTH_BUFFER_BIT);
+                glEnable(GL_DEPTH_TEST);
+                mainShader.Use();
+                RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel, SHADOWMAP);
+
+                glBindFramebuffer(GL_FRAMEBUFFER, bakeFramebuffer);
+                bakeShader.Use();
+                glUniformMatrix4fv(glGetUniformLocation(bakeShader.Program, "OrthoProj"), 1, GL_FALSE, glm::value_ptr(OrthoProj));
+                
+                glDisable(GL_CULL_FACE);
+                RenderObjects(bakeShader, currentProgramInside, currentModelInside, planeModel, BAKE);
+                glEnable(GL_CULL_FACE);
+
+                glBindFramebuffer(GL_FRAMEBUFFER, paintTextureFBO);
+                glClear(GL_COLOR_BUFFER_BIT);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+            }
+            
+        }
+        
+        /////////////////////////////////////////////////////////////////////
+
+
+        if (keys[GLFW_KEY_SPACE]) 
+        {
             toggleIMGui();
+        }
 
         // Swapping back and front buffers
         glfwSwapBuffers(window);
@@ -407,11 +554,19 @@ int main()
     // when I exit from the graphics loop, it is because the application is closing
     // we delete the Shader Programs
     mainShader.Delete();
+    bakeShader.Delete();
+    drawingShader.Delete();
 
     //Delete the IMGui context
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+
+    glDeleteFramebuffers(3, depthMapFBO);
+    glDeleteFramebuffers(1, &paintTextureFBO);
+    glDeleteFramebuffers(1, &bakeFramebuffer);
+    glDeleteFramebuffers(1, &bakeShadowMapFBO);
+
 
     // we close and delete the created context
     glfwTerminate();
@@ -536,6 +691,18 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         keys[GLFW_KEY_D] = false;
     }
 
+    if(key == GLFW_KEY_E && action == GLFW_PRESS)
+    {
+        keys[GLFW_KEY_E] = true;
+    }
+    if(key == GLFW_KEY_E && action == GLFW_RELEASE)
+    {
+        keys[GLFW_KEY_E] = false;
+        mouseHist.clear();
+        numMousePoints = 0;
+    }
+    
+
     if(key == GLFW_KEY_SPACE && action == GLFW_PRESS)
     {
         keys[GLFW_KEY_SPACE] = !keys[GLFW_KEY_SPACE];
@@ -555,9 +722,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 //Mouse Inputs 
 void mouse_callback(GLFWwindow* window, double xPos, double yPos)
 {   
+    glfwGetCursorPos(window, &xPos, &yPos);
     if (!keys[GLFW_KEY_SPACE])
     {
-        glfwGetCursorPos(window, &xPos, &yPos);
 
         if (firstMouse)
         {
@@ -587,6 +754,17 @@ void mouse_callback(GLFWwindow* window, double xPos, double yPos)
         cameraRight = glm::normalize(glm::vec3(sin(horizontalAngle - 3.14f/2.0f), 0, cos(horizontalAngle - 3.14f/2.0f)));
         cameraUp = glm::cross(cameraRight, cameraView);
     }
+
+    mouseX = (float)(2 * xPos) / screenWidth - 1.0f;
+    mouseY = 1.0f - (float)(2 * yPos) / screenHeight;
+
+    if (keys[GLFW_KEY_E]) 
+    {
+        mouseHist.push_back(mouseX);
+        mouseHist.push_back(mouseY);
+        numMousePoints++;
+    }
+    
 }
 
 void Do_Movement()
@@ -812,7 +990,7 @@ void toggleIMGui()
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
                 ImGui::GetIO().Framerate);
-    ImGui::Text("Mouse position: (%.5f, %.5f)", lastxPos, lastyPos);
+    ImGui::Text("Mouse position: (%.5f, %.5f)", mouseX, mouseY);
     ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
     // Ends of imgui
     ImGui::End();
@@ -823,57 +1001,84 @@ void toggleIMGui()
 
 void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int render_pass, int loopIter)
 {
+    if (render_pass == BAKE)
+    {
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, paintTexture);
+        GLint paintTextureLoc = glGetUniformLocation(mainShader.Program, "paintTexture");
+        glUniform1i(paintTextureLoc, 3); 
+
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, meshTexture);
+        GLint meshTextureLoc = glGetUniformLocation(mainShader.Program, "meshTexture");
+        glUniform1i(meshTextureLoc, 4);
+
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, bakeShadowMap);
+        GLint bakeShadowMapLoc = glGetUniformLocation(mainShader.Program, "bakeShadowMap");
+        glUniform1i(bakeShadowMapLoc, 5);
+
+        glUniform2f(glGetUniformLocation(mainShader.Program, "screenScale"), 2.0 * screenWidth, 2.0 * screenHeight);
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "brushColor"), 1,  glm::value_ptr(brushColor));
+
+    }
+
     if (render_pass==RENDER)
     {
         glActiveTexture(GL_TEXTURE0 + modelType);
         glBindTexture(GL_TEXTURE_2D, depthMap[modelType]);
         GLint shadowLocation = glGetUniformLocation(mainShader.Program, "shadowMap");
         glUniform1i(shadowLocation, modelType);
+
+        // set the subroutine to FULLCOLOR for the FLoorplanes
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        // we set the Modelmatrix and Normalmatrix for the larger Floorplane
+        glm::mat4 planeModelMatrix = glm::mat4(1.0f);
+        glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+
+        //Send the Matrizes and the color Uniform to our mainShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+        planeModel.Draw();
+
+
+        // we set the Model and Normalmatrix for the smaller Floorplane
+        planeModelMatrix = glm::mat4(1.0f);
+        planeNormalMatrix = glm::mat3(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
+        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
+        // and the NormalMatrix
+        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+
+        //Send the Matrizes and the color Uniform to our mainShader
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+        planeModel.Draw();
+
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, meshTexture);
+        GLint meshTextureLoc = glGetUniformLocation(mainShader.Program, "meshTexture");
+        glUniform1i(meshTextureLoc, 4);
     }
-
-    // set the subroutine to FULLCOLOR for the FLoorplanes
-    GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
-    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
-
-    // we set the Modelmatrix and Normalmatrix for the larger Floorplane
-    glm::mat4 planeModelMatrix = glm::mat4(1.0f);
-    glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
-    planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
-    planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
-    //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-    // and the NormalMatrix
-    planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-    //Send the Matrizes and the color Uniform to our mainShader
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-    glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
-    planeModel.Draw();
-
-
-    // we set the Model and Normalmatrix for the smaller Floorplane
-    planeModelMatrix = glm::mat4(1.0f);
-    planeNormalMatrix = glm::mat3(1.0f);
-    planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
-    planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
-    //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-    // and the NormalMatrix
-    planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
-
-    //Send the Matrizes and the color Uniform to our mainShader
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-    glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
-    planeModel.Draw();
 
 
     // Here we swap the subroutines in the fragment shader
     // first search in the shader program the index corresponding to the portal loop
-    index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+loopIter].c_str());
+    GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+loopIter].c_str());
     // then change the subroutine accordingly
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
@@ -896,4 +1101,35 @@ void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model 
     glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
     glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
     models[modelType].Draw();
+}
+
+void drawPoint(GLuint framebuffer) {
+    // Specify the vertex data
+    GLfloat vertices [4*numMousePoints];
+    std::copy(mouseHist.begin(), mouseHist.end(),vertices);
+
+    GLuint VBO, VAO;
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (void*)0);
+    glEnableVertexAttribArray(0);
+    
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    // Draw the point
+    glDrawArrays(GL_POINTS, 0, numMousePoints);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // Draw the point
+    glDrawArrays(GL_POINTS, 0, numMousePoints);
+    glBindVertexArray(0);
+
+    // Cleanup
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
 }

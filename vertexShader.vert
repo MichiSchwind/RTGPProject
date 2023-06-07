@@ -20,6 +20,7 @@ out vec3 N;
 out vec3 lightDir;
 out vec3 vViewPosition;
 out vec4 posLightSpace;
+out vec4 screenPos;
 
 void main() 
 {
@@ -33,6 +34,8 @@ void main()
     lightDir = lightsInViewCoords.xyz -  posInViewCoords.xyz;
     
     vViewPosition = -posInViewCoords.xyz;
+
+    screenPos = projectionMatrix * posInViewCoords;
 
     gl_Position = projectionMatrix * posInViewCoords;
 
