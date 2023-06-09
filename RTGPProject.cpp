@@ -32,6 +32,10 @@
 #include "imgui/imgui_impl_glfw.h"
 #include "imgui/imgui_impl_opengl3.h"
 
+// we include the library for images loading
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image/stb_image.h"
+
 
 
 // dimensions of application's window
@@ -75,6 +79,8 @@ void drawLines(GLuint framebuffer);
 
 // calculate the nearest two portals
 std::vector<GLuint> nearestPortals(glm::vec3 cameraPos);
+
+GLint LoadTexture(const char* path);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////SOME GLOBAL VARIABLES///////////////////////////////////////////////////////////////////////
@@ -98,25 +104,27 @@ GLboolean wireframe = GL_FALSE;
 // the different Render passes
 enum render_passes{ SHADOWMAP, RENDER, BAKE};
 
+enum textureIDs {WOOD, CARPET, MARPLE, CONCRETE};
+
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
+enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR, Bloom, Texture };
 const int NumShader = 4;
 
 enum availabe_Models{Bunny, Cube, Sphere};
 const int NumModel = 3;
 
 // Models we use for the enviroment
-enum enviromentModels{Plane, Cylinder, Room};
+enum enviromentModels{Plane, Cylinder, Room, Lightbulb};
 
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR"};
+const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR", "Bloom", "Texture"};
 const char * print_availabe_Models[] = {"Bunny", "Cube", "Sphere"};
 
 // a vector for all the Shader Programs, models and enviroment models used and swapped in the application
 vector<std::string> shader;
 vector<Model> models;
 vector<Model> envModels;
-
+vector<GLint> textureId;
 // Uniforms to pass to shaders
 // color to be passed to Fullcolor and Flatten shaders
 GLfloat myColor[] = {1.0f,0.0f,0.0f};
@@ -128,6 +136,9 @@ GLfloat colorCylinder[] = {0.1f, 0.1f, 0.1f};
 
 //Set up Camera Position and View Direction
 bool keys[1024] = {0};
+
+// position of the Light
+glm::vec3 lightPos = glm::vec3(0.0f,4.0f,4.0f);
 
 // initialise the camera 
 glm::vec3 cameraPos;
@@ -250,6 +261,7 @@ int main()
     Model planeModel("models/plane.obj");
     Model cylinderModel("models/cylinder.obj");
     Model roomModel("models/room.obj");
+    Model lightbulbModel("models/lightbulb.obj");
 
     // we set up the models and enviroment models vector
     models.push_back(std::move(bunnyModel));
@@ -259,6 +271,12 @@ int main()
     envModels.push_back(std::move(planeModel));
     envModels.push_back(std::move(cylinderModel));
     envModels.push_back(std::move(roomModel));
+    envModels.push_back(std::move(lightbulbModel));
+
+    textureId.push_back(LoadTexture("textures/darkWood.png"));
+    textureId.push_back(LoadTexture("textures/darkWood.png"));
+    textureId.push_back(LoadTexture("textures/whiteMarple.png"));
+    textureId.push_back(LoadTexture("textures/crackedConcrete.png"));
 
 
     // we set up the Portalmesh
@@ -286,7 +304,6 @@ int main()
 
     // Light Informations
     // Light Positions
-    glm::vec3 lightPos = glm::vec3(0.0f,4.0f,4.0f);
     std::vector<glm::mat4> shadowTransforms;
     shadowTransforms.push_back(shadowProj * 
                  glm::lookAt(lightPos, lightPos + glm::vec3( 1.0, 0.0, 0.0), glm::vec3(0.0,-1.0, 0.0)));
@@ -1121,9 +1138,25 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         GLint shadowLocation = glGetUniformLocation(mainShader.Program, "shadowMap");
         glUniform1i(shadowLocation, modelType);
 
-        // set the subroutine to FULLCOLOR for the FLoorplanes
-        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[Bloom].c_str());
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        glm::mat4 lightbulbModelMatrix = glm::mat4(1.0f);
+        lightbulbModelMatrix = glm::translate(lightbulbModelMatrix, lightPos);
+        //lightbulbModelMatrix = glm::rotate(lightbulbModelMatrix, glm::radians(180.0f), glm::vec3(1.0f,0.0f,0.0f));
+        lightbulbModelMatrix = glm::scale(lightbulbModelMatrix, glm::vec3(0.1f,0.13f,0.1f));
+
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(lightbulbModelMatrix));
+        models[Sphere].Draw();
+
+        // set the subroutine to Texture for the FLoorplanes
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[Texture].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+        glActiveTexture(GL_TEXTURE6);
+        glBindTexture(GL_TEXTURE_2D, textureId[WOOD]);
+        GLint textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
+        glUniform1i(textureLocation, 6);
 
         // we set the Modelmatrix and Normalmatrix for the larger Floorplane
         glm::mat4 planeModelMatrix = glm::mat4(1.0f);
@@ -1142,6 +1175,10 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
         envModels[Plane].Draw();
 
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D, textureId[MARPLE]);
+        textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
+        glUniform1i(textureLocation, 7);
 
         // we set the Model and Normalmatrix for the smaller Floorplane
         planeModelMatrix = glm::mat4(1.0f);
@@ -1159,8 +1196,13 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
         envModels[Plane].Draw();
-
-        /*glm::vec3 wallPos[] = {glm::vec3(10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,10.0f), glm::vec3(-10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-10.0f)};
+        
+        /*
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, textureId[MARPLE]);
+        textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
+        glUniform1i(textureLocation, 8);
+        glm::vec3 wallPos[] = {glm::vec3(10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,10.0f), glm::vec3(-10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-10.0f)};
         glm::vec3 wallRot[] = {glm::vec3(0.0f,0.0f, 1.0f), glm::vec3(-1.0f,0.0f, 0.0f), glm::vec3(0.0f,0.0f, -1.0f), glm::vec3(1.0f,0.0f, 0.0f)};
 
         for (int i= 0; i<4; i++)
@@ -1175,6 +1217,11 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
             envModels[Plane].Draw();
         }*/
 
+        glActiveTexture(GL_TEXTURE9);
+        glBindTexture(GL_TEXTURE_2D, textureId[CONCRETE]);
+        textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
+        glUniform1i(textureLocation, 9);
+
         planeModelMatrix = glm::mat4(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,10.0f,0.0f));
         planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(180.0f), glm::vec3(1.0f,0.0f,0.0f));
@@ -1184,13 +1231,12 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
         envModels[Plane].Draw();
 
+
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, bakeTexture);
         GLint bakeTextureLoc = glGetUniformLocation(mainShader.Program, "bakeTexture");
         glUniform1i(bakeTextureLoc, 4);
     }
-
-    // in every instance we render the Model
 
     // set up the subroutine
     GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex].c_str());
@@ -1224,12 +1270,20 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
     {
         glm::mat4 cylinderModelMatrix = glm::mat4(1.0f);
         cylinderModelMatrix = glm::translate(cylinderModelMatrix, cylinderPos[i]);
-        cylinderModelMatrix = glm::scale(cylinderModelMatrix, glm::vec3(0.001f, 0.01f, 0.001f));
+        cylinderModelMatrix = glm::scale(cylinderModelMatrix, glm::vec3(0.001f, 0.02f, 0.001f));
 
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(cylinderModelMatrix));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorCylinder);
         envModels[Cylinder].Draw();
     }
+
+    glm::mat4 cylinderModelMatrix = glm::mat4(1.0f);
+    cylinderModelMatrix = glm::translate(cylinderModelMatrix, lightPos + glm::vec3(0.0f,0.15f,0.0f));
+    cylinderModelMatrix = glm::scale(cylinderModelMatrix, glm::vec3(0.0001f, 0.01f, 0.0001f));
+
+    glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(cylinderModelMatrix));
+    glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorCylinder);
+    envModels[Cylinder].Draw();
     
 }
 
@@ -1325,4 +1379,39 @@ std::vector<GLuint> nearestPortals(glm::vec3 cameraPos)
     index.push_back(tempIndex);
     
     return index;
+}
+
+GLint LoadTexture(const char* path)
+{
+    GLuint textureImage;
+    int w, h, channels;
+    unsigned char* image;
+    image = stbi_load(path, &w, &h, &channels, STBI_rgb);
+
+    if (image == nullptr)
+        std::cout << "Failed to load texture!" << std::endl;
+
+    glGenTextures(1, &textureImage);
+    glBindTexture(GL_TEXTURE_2D, textureImage);
+    // 3 channels = RGB ; 4 channel = RGBA
+    if (channels==3)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
+    else if (channels==4)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    // we set how to consider UVs outside [0,1] range
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // we set the filtering for minification and magnification
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+    // we free the memory once we have created an OpenGL texture
+    stbi_image_free(image);
+
+    // we set the binding to 0 once we have finished
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return textureImage;
+
 }

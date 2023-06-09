@@ -14,6 +14,7 @@ uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;
 
 out vec3 lPos;
+out vec4 lPosScreen;
 out vec3 lightDir;
 out vec2 interp_UV;
 out vec3 N;
@@ -32,6 +33,8 @@ void main()
     vec4 posInViewCoords = viewMatrix * modelMatrix * vec4(position, 1.0f);
 
     lPos = lightPos;
+
+    lPosScreen = projectionMatrix * viewMatrix * vec4(lPos,1.0);
 
     lightDir = (viewMatrix * (vec4(lightPos,1.0) - posInWorldCoords)).xyz;
     

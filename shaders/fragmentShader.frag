@@ -4,6 +4,7 @@ const float PI = 3.14159265359;
 
 in vec2 interp_UV;
 in vec3 lPos;
+in vec4 lPosScreen;
 in vec3 lightDir;
 in vec3 N;
 in vec3 vViewPosition;
@@ -33,8 +34,10 @@ uniform float alpha;
 uniform float F0; 
 
 uniform float uvRep;
+uniform float texRep;
 uniform float far_plane;
 uniform samplerCube shadowMap;
+uniform sampler2D textureID;
 uniform sampler2D bakeTexture;
 
 out vec4 colorFrag;
@@ -113,7 +116,7 @@ float Shadow()
     float currentDepth = length(fragToLight);
 
     // now test for shadows
-    float bias = 0.5; 
+    float bias = 0.05; 
     float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
 
     return shadow;
@@ -283,7 +286,7 @@ subroutine(fragShaders) vec4 LambertianPlusShadow()
     }
 
     color = LambertianFunc(color);
-    return vec4((0.9 - shadow) * color, 1.0f);
+    return vec4((1.1 - shadow) * color, 1.0f);
 }
 
 subroutine(fragShaders) vec4 PhongPlusShadw()
@@ -296,7 +299,7 @@ subroutine(fragShaders) vec4 PhongPlusShadw()
         color = paint;
     }
     color = PhongFunc(color);
-    return vec4((0.9 - shadow) * color, 1.0f);
+    return vec4((1.1 - shadow) * color, 1.0f);
 }
 
 subroutine(fragShaders) vec4 BlinnPhongPlusShadow()
@@ -309,7 +312,7 @@ subroutine(fragShaders) vec4 BlinnPhongPlusShadow()
         color = paint;
     }
     color = BlinnPhongFunc(color);
-    return vec4((0.9 - shadow) * color, 1.0f);
+    return vec4((1.1 - shadow) * color, 1.0f);
 }
 
 subroutine(fragShaders) vec4 GGXPlusShadow()
@@ -322,7 +325,7 @@ subroutine(fragShaders) vec4 GGXPlusShadow()
         color = paint;
     }
     color = GGXFunc(color);
-    return vec4((0.9 - shadow) * color, 1.0f);
+    return vec4((1.1 - shadow) * color, 1.0f);
 }
 
 subroutine(fragShaders) vec4 normal2ColorPlusLambertian()
@@ -350,9 +353,26 @@ subroutine(fragShaders) vec4 FULLCOLOR()
 {
     float shadow = Shadow();
     vec3 color = calculateBrightness(length(posInWorldCoords.xyz - lPos), 0.3f) * colorIn;
-    return vec4((0.9 - shadow) * color, 1.0);
+    return vec4((1.1 - shadow) * color, 1.0);
 }
 
+subroutine(fragShaders) vec4 Bloom()
+{
+    vec3 color = vec3(1.0,1.0,1.0);
+    float dist = length(lPos - (posInWorldCoords.xyz / posInWorldCoords.w));
+
+    color = (10000.0 / pow(1 + dist, 80.0)) * color;
+
+    return vec4(color, 1.0);
+}
+
+subroutine(fragShaders) vec4 Texture()
+{
+    float shadow = Shadow();
+    vec3 color = texture(textureID, mod(interp_UV,1.0)).rgb;
+    color = calculateBrightness(length(posInWorldCoords.xyz - lPos), 0.3f) * color;
+    return vec4((1.1 - shadow) * color, 1.0);
+}
 
 
 void main()
