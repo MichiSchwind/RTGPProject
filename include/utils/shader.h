@@ -1,15 +1,4 @@
-/*
-Shader class
-- loading Shader source code, Shader Program creation
-
-N.B. ) adaptation of https://github.com/JoeyDeVries/LearnOpenGL/blob/master/includes/learnopengl/shader.h
-
-author: Davide Gadia
-
-Real-Time Graphics Programming - a.a. 2022/2023
-Master degree in Computer Science
-Universita' degli Studi di Milano
-*/
+// This is basically the shader.h from the lecture, but with the extension that it also loads a geometry shader
 
 #pragma once
 
@@ -21,6 +10,7 @@ using namespace std;
 #include <sstream>
 #include <iostream>
 
+
 /////////////////// SHADER class ///////////////////////
 class Shader
 {
@@ -30,7 +20,7 @@ public:
     //////////////////////////////////////////
 
     //constructor
-    Shader(const GLchar* vertexPath, const GLchar* fragmentPath)
+    Shader(const GLchar* vertexPath, const GLchar* fragmentPath, const GLchar* geometryPath = NULL)
     {
         // Step 1: we retrieve shaders source code from provided filepaths
         string vertexCode;
@@ -87,13 +77,63 @@ public:
         this->Program = glCreateProgram();
         glAttachShader(this->Program, vertex);
         glAttachShader(this->Program, fragment);
-        glLinkProgram(this->Program);
-        // check linking errors
-        checkCompileErrors(this->Program, "PROGRAM");
+
+        // do the same for the geometry shader
+        if (geometryPath != NULL) 
+        {
+            // Step 1: we retrieve shaders source code from provided filepaths
+            string geometryCode;
+            ifstream geometryFile;
+            
+            // ensure ifstream objects can throw exceptions:
+            geometryFile.exceptions (ifstream::failbit | ifstream::badbit);
+            try
+            {
+                // Open files
+                geometryFile.open(geometryPath);
+                stringstream geometryStream;
+                // Read file's buffer contents into streams
+                geometryStream << geometryFile.rdbuf();
+
+                // close file handlers
+                geometryFile.close();
+
+                // Convert stream into string
+                geometryCode = geometryStream.str();
+            }
+            catch (ifstream::failure e)
+            {
+                cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ" << endl;
+            }
+
+            const GLchar* gShaderCode = geometryCode.c_str();
+
+            GLuint geometry = glCreateShader(GL_GEOMETRY_SHADER);
+            glShaderSource(geometry, 1, &gShaderCode, NULL);
+            glCompileShader(geometry);
+            // check compilation errors
+            checkCompileErrors(geometry, "GEOMETRY");
+
+            glAttachShader(this->Program, geometry);
+
+            glLinkProgram(this->Program);
+            // check linking errors
+            checkCompileErrors(this->Program, "PROGRAM");
+            
+            glDeleteShader(geometry);
+        }
+        else 
+        {
+            glLinkProgram(this->Program);
+            // check linking errors
+            checkCompileErrors(this->Program, "PROGRAM");
+        }
+        
 
         // Step 4: we delete the shaders because they are linked to the Shader Program, and we do not need them anymore
         glDeleteShader(vertex);
         glDeleteShader(fragment);
+        
     }
 
     //////////////////////////////////////////

@@ -36,79 +36,86 @@
 
 // dimensions of application's window
 GLuint screenWidth = 1200, screenHeight = 900;
+const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 
+///////////////////////////////////INITIALISE FUNCTIONS//////////////////////////////////////////////////////////////////////
 // callback functions for keyboard events
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 
-//////// Maybe camera.h?
+// function to move the camera by pressing w,a,s,d
 void Do_Movement();
 
+// here we do camera tilting, as well as saving mouse position that gets drawn in the paint texture
 void mouse_callback(GLFWwindow* window, double xPos, double yPos);
 
-// setup of Shader Programs - This could be worked on
+// setup of Shader Programs
 void SetupShaders(int program);
 
 // setup VAO for Portal
 GLuint SetupPortal();
 
 // Function for rendering Objects
-void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int render_pass, int loopIter = 0);
+void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int render_pass);
 
 // Function dealing with the Rendering of the 4 Portals
-void PortalRenderLoop(Shader &mainShader,GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO, int render_pass);
+void PortalRenderLoop(Shader &mainShader,GLint shaderIndex[], GLint modelType[], GLuint VAO, std::vector<GLuint> shortestIndices, int render_pass);
 
 // manage the Shader and Modelindices that gets rendering in each Portal
-void ManagePortalContent();
+void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFrontRight, GLint &currentModelBackLeft, GLint &currentModelFrontRight);
 
 // print on console the name of current shader
 void PrintCurrentShader(int shader);
 void PrintCurrentModel(int model);
 
 // set the Shader for Model rendered inside the Portals
-void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader);
-
-//  Function that calls the IMGui if Space is pressed
-void toggleIMGui();
+void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader, GLint &currentProgramInside, GLint &currentModelInside, GLint &currentModelFrontRight, GLint &currentModelBackLeft);
 
 // Function for creating VAO and VBO in order to draw a point
-void drawPoint(GLuint framebuffer);
+void drawLines(GLuint framebuffer);
 
+// calculate the nearest two portals
+std::vector<GLuint> nearestPortals(glm::vec3 cameraPos);
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/////////////////////////////SOME GLOBAL VARIABLES///////////////////////////////////////////////////////////////////////
 // parameters for time calculation (for animations)
 GLfloat deltaTime = 0.0f;
+GLfloat currentFrame;
 GLfloat lastFrame = 0.0f;
 
 // rotation angle on Y axis
 GLfloat orientationY = 0.0f;
+
 // rotation speed on Y axis
 GLfloat spinspeed = 0.5f;
+
 // boolean to start/stop animated rotation on Y angle
 GLboolean spinning = GL_TRUE;
 
 // boolean to activate/deactivate wireframe rendering
 GLboolean wireframe = GL_FALSE;
 
+// the different Render passes
 enum render_passes{ SHADOWMAP, RENDER, BAKE};
+
 // enum data structure to manage indices for shaders swapping
 enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR };
 const int NumShader = 4;
+
 enum availabe_Models{Bunny, Cube, Sphere};
 const int NumModel = 3;
+
+// Models we use for the enviroment
+enum enviromentModels{Plane, Cylinder, Room};
+
 // strings with shaders names to print the name of the current one on console
 const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR"};
-const char * print_availabe_Models[] = {"Buny", "Cube", "Sphere"};
+const char * print_availabe_Models[] = {"Bunny", "Cube", "Sphere"};
 
-// index of the current shader (= 0 in the beginning)
-GLuint currentProgramFrontRight = LambertianPlusShadow;
-GLuint currentProgramBackLeft = BlinnPhongPlusShadow;
-GLuint currentProgramInside = LambertianPlusShadow;
-GLuint currentModelFrontRight = Bunny;
-GLuint currentModelBackLeft = Sphere;
-GLuint currentModelInside = Bunny;
-
-// a vector for all the Shader Programs used and swapped in the application
+// a vector for all the Shader Programs, models and enviroment models used and swapped in the application
 vector<std::string> shader;
 vector<Model> models;
+vector<Model> envModels;
 
 // Uniforms to pass to shaders
 // color to be passed to Fullcolor and Flatten shaders
@@ -116,81 +123,64 @@ GLfloat myColor[] = {1.0f,0.0f,0.0f};
 GLfloat colorWhite[] = {0.8f,0.8f,0.8f};
 GLfloat colorDarkRed[] = {0.35f,0.0f,0.0f};
 GLfloat colorSandstone[] ={222.0f/255.0f,205.0f/255.0f,190.0f/255.0f};
+GLfloat colorCylinder[] = {0.1f, 0.1f, 0.1f};
 
-// Light Informations
-// Light Positions
-glm::vec3 lightPos = glm::vec3(0.0f,2.0f,4.0f);
-glm::vec3 lightRight = glm::vec3(0.0f,0.0f,-1.0f);
-glm::vec3 lightPointsTo = glm::vec3(1.0f,1.0f,1.0f);
-
-// specular and ambient components
-GLfloat specularColor[] = {1.0,1.0,1.0};
-GLfloat ambientColor[] = {0.1,0.1,0.1};
-// weights for the diffusive, specular and ambient components
-GLfloat Kd = 0.8f;
-GLfloat Ks = 0.5f;
-GLfloat Ka = 0.1f;
-// shininess coefficient for Blinn-Phong shader
-GLfloat shininess = 25.0f;
-
-// roughness index for GGX shader
-GLfloat alpha = 0.2f;
-// Fresnel reflectance at 0 degree (Schlik's approximation)
-GLfloat F0 = 0.9f;
-
-// weight and velocity for the animation of Wave shader
-GLfloat currentFrame;
-GLfloat weight = 0.2f;
-GLfloat speed = 5.0f;
 
 //Set up Camera Position and View Direction
 bool keys[1024] = {0};
 
+// initialise the camera 
 glm::vec3 cameraPos;
 glm::vec3 lastCameraPos;
 glm::vec3 cameraView;
 glm::vec3 cameraRight;
 glm::vec3 cameraUp;
 glm::mat4 view;
+float horizontalAngle;
+float verticalAngle;
 
 
 // Projection matrix: FOV angle, aspect ratio, near and far planes
 glm::mat4 projection = glm::perspective(45.0f, (float)screenWidth/(float)screenHeight, 0.1f, 10000.0f);
+// Orthogonal Projection: we use this in baking Shader to get UV coordinates in screencoords
 glm::mat4 OrthoProj = glm::ortho(0,1,0,1,-1,1);
 
-float horizontalAngle;
-float verticalAngle;
+float aspect = (float)SHADOW_WIDTH/(float)SHADOW_HEIGHT;
+float near = 1.0f;
+float far = 25.0f;
+glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), aspect, near, far); 
+
+
+// initialise Mouse informations
 float mouseX;
 float mouseY;
 float lastxPos;
 float lastyPos;
 bool firstMouse;
-
-GLuint depthMap[3];
-GLuint meshTexture;
-GLuint paintTexture;
-GLuint bakeShadowMap;
-GLfloat pointSize = 15.0f;
 std::vector<float> mouseHist;
 GLint numMousePoints;
 
-glm::vec3 brushColor = glm::vec3(0.0f,1.0f,0.0f);
+//initialise unsigned ints for the different Textures we use
+GLuint depthCubemap[3];
+GLuint bakeTexture;
+GLuint paintTexture;
+GLuint bakeDepthMap;
 
+
+// initialise Informations for texture drawing
+GLfloat brushColor[] = {0.0f,1.0f,0.0f};
+float uvRep = 1.0;
+float lineSize = 0.01;
 bool bake = false;
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
-/////////////////// MAIN function ///////////////////////
+///////////////////////////////////// MAIN FUNCTION /////////////////////////////////////////////////////////////////////////////
 int main()
 {
     // Initialization of OpenGL context using GLFW
     glfwInit();
-    // We set OpenGL specifications required for this application
-    // In this case: 4.1 Core
-    // It is possible to raise the values, in order to use functionalities of more recent OpenGL specs.
-    // If not supported by your graphics HW, the context will not be created and the application will close
-    // N.B.) creating GLAD code to load extensions, try to take into account the specifications and any extensions you want to use,
-    // in relation also to the values indicated in these GLFW commands
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -199,7 +189,7 @@ int main()
     glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 
     // we create the application's window
-    GLFWwindow* window = glfwCreateWindow(screenWidth, screenHeight, "MY_TESTING_KIT", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(screenWidth, screenHeight, "RTGPProject", nullptr, nullptr);
     if (!window)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -240,21 +230,17 @@ int main()
     // we enable Z test
     glEnable(GL_DEPTH_TEST);
 
-    // we enable face culling - this is important for the portals
+    // we enable face culling, so we dont see the backside of the portals
     glEnable(GL_CULL_FACE);
-
-    glEnable(GL_PROGRAM_POINT_SIZE);
-    glEnable(GL_LINE_SMOOTH);
 
     //the "clear" color for the frame buffer
     glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
 
     // we create the Shader Programs used in the application
-    Shader mainShader("vertexShader.vert", "fragmentSHader.frag");
-    Shader shadowShader("19_shadowmap.vert", "20_shadowmap.frag");
-    Shader drawingShader("Drawing.vert", "Drawing.frag");
-    Shader bakeShader("bakeShader.vert", "bakeShader.frag");
-    //Shader planeShader("00_basic.vert", "01_fullcolor.frag");
+    Shader mainShader("shaders/vertexShader.vert", "shaders/fragmentSHader.frag");
+    Shader shadowShader("shaders/shadowmap.vert", "shaders/shadowmap.frag", "shaders/shadow.geo");
+    Shader drawingShader("shaders/Drawing.vert", "shaders/Drawing.frag");
+    Shader bakeShader("shaders/bakeShader.vert", "shaders/bakeShader.frag");
     SetupShaders(mainShader.Program);
 
     // we load the model(s) (code of Model class is in include/utils/model.h)
@@ -262,17 +248,30 @@ int main()
     Model sphereModel("models/sphere.obj");
     Model bunnyModel("models/bunny_lp.obj");
     Model planeModel("models/plane.obj");
+    Model cylinderModel("models/cylinder.obj");
+    Model roomModel("models/room.obj");
 
-    //Model david ("../../models/David.obj");
+    // we set up the models and enviroment models vector
     models.push_back(std::move(bunnyModel));
     models.push_back(std::move(cubeModel));
     models.push_back(std::move(sphereModel));
 
+    envModels.push_back(std::move(planeModel));
+    envModels.push_back(std::move(cylinderModel));
+    envModels.push_back(std::move(roomModel));
+
+
     // we set up the Portalmesh
     GLuint PortalVAO = SetupPortal();
 
-    // we print on console the name of the first shader used
-    PrintCurrentShader(currentProgramInside);
+    // we set the initial indices for the shaders and models shown in the FRONT/RIGHT, BACK/LEFT portal and what is inside
+    GLint currentProgramFrontRight = LambertianPlusShadow;
+    GLint currentProgramBackLeft = BlinnPhongPlusShadow;
+    GLint currentProgramInside = LambertianPlusShadow;
+    GLint currentModelFrontRight = Bunny;
+    GLint currentModelBackLeft = Sphere;
+    GLint currentModelInside = Bunny;
+
     
     // View matrix (=camera): position, view direction, camera "up" vector
     cameraPos = glm::vec3(0.0f,0.0f,7.0f);
@@ -285,42 +284,68 @@ int main()
     cameraUp = glm::cross(cameraRight, cameraView);
     view = glm::lookAt(cameraPos, cameraPos + cameraView, cameraUp);
 
-    /////////////////// CREATION OF BUFFER FOR THE  DEPTH MAP /////////////////////////////////////////
-    // buffer dimension: too large -> performance may slow down if we have many lights; too small -> strong aliasing
-    const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
-    GLuint depthMapFBO[3];
+    // Light Informations
+    // Light Positions
+    glm::vec3 lightPos = glm::vec3(0.0f,4.0f,4.0f);
+    std::vector<glm::mat4> shadowTransforms;
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 1.0, 0.0, 0.0), glm::vec3(0.0,-1.0, 0.0)));
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3(-1.0, 0.0, 0.0), glm::vec3(0.0,-1.0, 0.0)));
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 1.0, 0.0), glm::vec3(0.0, 0.0, 1.0)));
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0,-1.0, 0.0), glm::vec3(0.0, 0.0,-1.0)));
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 0.0, 1.0), glm::vec3(0.0,-1.0, 0.0)));
+    shadowTransforms.push_back(shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 0.0,-1.0), glm::vec3(0.0,-1.0, 0.0)));
+
+    // specular and ambient components
+    GLfloat specularColor[] = {1.0,1.0,1.0};
+    GLfloat ambientColor[] = {0.1,0.1,0.1};
+    // weights for the diffusive, specular and ambient components
+    GLfloat Kd = 0.8f;
+    GLfloat Ks = 0.5f;
+    GLfloat Ka = 0.1f;
+    // shininess coefficient for Blinn-Phong shader
+    GLfloat shininess = 25.0f;
+
+    // roughness index for GGX shader
+    GLfloat alpha = 0.2f;
+    // Fresnel reflectance at 0 degree (Schlik's approximation)
+    GLfloat F0 = 0.9f;
+
+    /////////////////// CREATION OF BUFFER FOR THE  DEPTH MAP ///////////////////////////////////////////////////////
+    GLuint depthCubemapFBO[3];
     for (int i =0 ;  i < 3; i++) 
     {
-        // we create a Frame Buffer Object: the first rendering step will render to this buffer, and not to the real frame buffer
-        glGenFramebuffers(1, &depthMapFBO[i]);
-        // we create a texture for the depth map
-        glGenTextures(1, &depthMap[i]);
-        glBindTexture(GL_TEXTURE_2D, depthMap[i]);
-        // in the texture, we will save only the depth data of the fragments. Thus, we specify that we need to render only depth in the first rendering     step
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH,  SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        // we set to clamp the uv coordinates outside [0,1] to the color of the border
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
-        // outside the area covered by the light frustum, everything is rendered in shadow (because we set GL_CLAMP_TO_BORDER)
-        // thus, we set the texture border to white, so to render correctly everything not involved by the shadow map
-        //*************
-        GLfloat borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-        // we bind the depth map FBO
-        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO[i]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap[i], 0);
-        // we set that we are not calculating nor saving color data
+        glGenFramebuffers(1, &depthCubemapFBO[i]);
+        
+        glGenTextures(1, &depthCubemap[i]);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap[i]);
+      
+        for (unsigned int i = 0; i < 6; ++i)
+        {
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE); 
+            GLfloat borderColor[] = {1.0f,1.0f,1.0f,1.0f} ;
+            glTexParameterfv(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BORDER_COLOR, borderColor);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, depthCubemapFBO[i]);
+        glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubemap[i], 0);
         glDrawBuffer(GL_NONE);
         glReadBuffer(GL_NONE);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); 
     }
-    ///////////////////////////////////////////////////////////////////
-    std::vector<GLubyte> whiteTextureData( 4 *screenWidth *  screenHeight * 3, 255);
-    //////////////////Creation of the drawing Buffer///////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    
+    //////////////////Creation of the drawing Buffer and the texture to be drawn in///////////////////////////////
     GLuint paintTextureFBO;
     
     glGenFramebuffers(1, &paintTextureFBO);
@@ -328,15 +353,13 @@ int main()
     glGenTextures(1, &paintTexture);
     glBindTexture(GL_TEXTURE_2D, paintTexture);
 
+    
     glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB,  2 * screenWidth,  2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
-    GLfloat borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    //glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
 
     glBindFramebuffer(GL_FRAMEBUFFER, paintTextureFBO);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -345,18 +368,18 @@ int main()
     glDrawBuffer(GL_FRONT_AND_BACK);
     glReadBuffer(GL_FRONT_AND_BACK);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+    /////////////create the Framebuffer and texture to bake the paint texture to the Mesh/////////////////////////
+    GLuint bakeTextureFBO;
 
-
-    GLuint bakeFramebuffer;
-
-    glGenFramebuffers(1, &bakeFramebuffer);
+    glGenFramebuffers(1, &bakeTextureFBO);
     //// and the bake Texture
-    glGenTextures(1, &meshTexture);
-    glBindTexture(GL_TEXTURE_2D, meshTexture);
+    glGenTextures(1, &bakeTexture);
+    glBindTexture(GL_TEXTURE_2D, bakeTexture);
 
-    
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 2 *  screenWidth, 2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, whiteTextureData.data());
+    std::vector<GLubyte> whiteTextureData( 4 *screenWidth *  screenHeight * 3, 255);
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 2 *  screenWidth, 2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -364,43 +387,40 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, bakeFramebuffer);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, meshTexture, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, bakeTextureFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bakeTexture, 0);
 
     glDrawBuffer(GL_FRONT_AND_BACK);
     glReadBuffer(GL_FRONT_AND_BACK);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    GLuint bakeShadowMapFBO;
+    //////////////create a Depth Map for the texture baking///////////////////////////////////////////////////////
+    // We use this to not draw on both sides of the mesh or draw "through" the mesh 
 
-    glGenFramebuffers(1, &bakeShadowMapFBO);
-    
-    
-    glGenTextures(1, &bakeShadowMap);
-    glBindTexture(GL_TEXTURE_2D, bakeShadowMap);
+    GLuint bakeDepthMapFBO;
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,  2 * screenWidth, 2 * screenHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glGenFramebuffers(1, &bakeDepthMapFBO);
+    glGenTextures(1, &bakeDepthMap);
+    glBindTexture(GL_TEXTURE_2D, bakeDepthMap);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,  2*screenWidth, 2*screenHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, bakeShadowMapFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, bakeShadowMap, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, bakeDepthMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, bakeDepthMap, 0);
 
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-    ///////////////////////////////////////////////////////////////////
-
-    // Rendering loop: this code is executed at each frame
+    // Rendering loop
     while(!glfwWindowShouldClose(window))
     {
         // we determine the time passed from the beginning
@@ -412,13 +432,16 @@ int main()
         // Check is an I/O event is happening
         glfwPollEvents();
 
+        // when not in draw Mode do movements
         if (!keys[GLFW_KEY_SPACE])
             Do_Movement();
         
         // Manage the Model and Shader that are rendered in each Portal
-        ManagePortalContent();
+        ManagePortalContent(currentProgramBackLeft, currentProgramFrontRight, currentModelBackLeft, currentModelFrontRight);
+
         // set the Model and Shader that gets renedered inside the Portalcube
-        setInsideShader(currentProgramFrontRight, currentProgramBackLeft);
+        // the Model in the front and right portal is the same (the same holds for the left portal and the one in the back)
+        setInsideShader(currentProgramFrontRight, currentProgramBackLeft, currentProgramInside, currentModelInside, currentModelFrontRight, currentModelBackLeft);
 
 
         //Update view Matrix
@@ -431,48 +454,57 @@ int main()
         else
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        // if animated rotation is activated, then we increment the rotation angle using delta time and the rotation speed parameter
+
+        // if animated rotation is activated, we rotate the light source around mesh 
         if (spinning && !keys[GLFW_KEY_SPACE])
         {
             lightPos = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightPos;
-            lightRight = glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(spinspeed), glm::vec3(0.0f,1.0f,0.0f))) * lightRight;
+            shadowTransforms[0] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 1.0, 0.0, 0.0), glm::vec3(0.0,-1.0, 0.0)));
+            shadowTransforms[1] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3(-1.0, 0.0, 0.0), glm::vec3(0.0,-1.0, 0.0)));
+            shadowTransforms[2] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 1.0, 0.0), glm::vec3(0.0, 0.0, 1.0)));
+            shadowTransforms[3] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0,-1.0, 0.0), glm::vec3(0.0, 0.0,-1.0)));
+            shadowTransforms[4] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 0.0, 1.0), glm::vec3(0.0,-1.0, 0.0)));
+            shadowTransforms[5] = (shadowProj * 
+                 glm::lookAt(lightPos, lightPos + glm::vec3( 0.0, 0.0,-1.0), glm::vec3(0.0,-1.0, 0.0)));
         }
 
-        /////////////////// STEP 1 - SHADOW MAP: RENDERING OF SCENE FROM LIGHT POINT OF VIEW ////////////////////////////////////////////////
-        // we set view and projection matrix for the rendering using light as a camera
-        glm::mat4 lightProjection, lightView;
-        glm::mat4 lightSpaceMatrix;
-        // for a directional light, the projection is orthographic. For point lights, we should use a perspective projection
-        lightProjection = glm::perspective(glm::radians(80.0f), 1.0f, 2.0f, 50.0f);
-        // the light is directional, so technically it has no position. We need a view matrix, so we consider a position on the the directionvector    of the light
-        lightView = glm::lookAt(lightPos, lightPointsTo, glm::normalize(glm::cross(lightPointsTo, lightRight)));
-        // transformation matrix for the light
-        lightSpaceMatrix = lightProjection * lightView;
+        //////////////////////////////////////////////////// STEP 1 - SHADOW MAPPING ////////////////////////////////////////////////
         /// We "install" the  Shader Program for the shadow mapping creation
         shadowShader.Use();
+
         // we pass the transformation matrix as uniform
-        glUniformMatrix4fv(glGetUniformLocation(shadowShader.Program, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(shadowShader.Program, "shadowMatrices"), 6, GL_FALSE, glm::value_ptr(shadowTransforms[0]));
+        glUniform3fv(glGetUniformLocation(shadowShader.Program, "lightPos"), 1, glm::value_ptr(lightPos));
+        glUniform1f(glGetUniformLocation(shadowShader.Program,"far_plane"), far);
+
+
         // we set the viewport for the first rendering step = dimensions of the depth texture
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
 
+        // we calculate the shadow map for the Models currently loaded in the Portals
         for (int i:{currentModelFrontRight, currentModelBackLeft})
         {
             // we activate the FBO for the depth map rendering
-            glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO[i]);
+            glBindFramebuffer(GL_FRAMEBUFFER, depthCubemapFBO[i]);
             glClear(GL_DEPTH_BUFFER_BIT);
 
             // we render the scene, using the shadow shader
 
             // Render the Inside of the Portalcube
-            RenderObjects(shadowShader, 0, i, planeModel, SHADOWMAP);
+            RenderObjects(shadowShader, 0, i, SHADOWMAP);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, width, height);
+        ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+        //////////////////////////////////////// STEP 2 - MAIN RENDERING LOOP /////////////////////////////////////////////////////
+        // In this Step we render the 2 nearest portals in reference to the camera and the Model inside
 
-
-
-        /////// MAIN RENDERING LOOP /////////
         // we "clear" the frame and z buffer
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0xFF);
@@ -484,7 +516,7 @@ int main()
 
         // Send the uniforms containing the light information
         glUniform3fv(glGetUniformLocation(mainShader.Program, "lightPos"), 1, glm::value_ptr(lightPos));    
-        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix)); 
+        glUniform1f(glGetUniformLocation(mainShader.Program, "far_plane"), far);
         glUniform3fv(glGetUniformLocation(mainShader.Program, "ambientColor"), 1, ambientColor);
         glUniform3fv(glGetUniformLocation(mainShader.Program, "specularColor"), 1, specularColor);
         glUniform1f(glGetUniformLocation(mainShader.Program, "shininess"), shininess);
@@ -494,56 +526,94 @@ int main()
         glUniform1f(glGetUniformLocation(mainShader.Program, "Kd"), Kd);
         glUniform1f(glGetUniformLocation(mainShader.Program, "Ks"), Ks);
 
-        // Render Portals plus what's inside of them
-        PortalRenderLoop(mainShader, currentProgramFrontRight, -1.0f, currentModelFrontRight, planeModel, PortalVAO, RENDER);
-        PortalRenderLoop(mainShader, currentProgramBackLeft, 1.0f,currentModelBackLeft, planeModel, PortalVAO, RENDER);
         
-        // Render the Inside of the Portalcube
-        RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel, RENDER);
+        GLint portalShader[] = {currentProgramFrontRight, currentProgramBackLeft};
+        GLint portalModel[] = {currentModelFrontRight,currentModelBackLeft};
 
-        ////////////////////////Drawing Buffer//////////////////////
+        // find the two nearest portals
+        std::vector<GLuint> shortestIndices = nearestPortals(cameraPos);
+
+        // Render Portals plus what's inside of them
+        PortalRenderLoop(mainShader, portalShader, portalModel, PortalVAO, shortestIndices, RENDER);
+        
+
+        // Render the Inside of the Portalcube
+        RenderObjects(mainShader, currentProgramInside, currentModelInside, RENDER);
+        //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        ////////////////////////////////////////////// STEP 3 - DRAW THE TEXTURE//////////////////////////////////////////////////////
+        // when we are in drawing Mode (by pressing SPACE), we first draw in a framebuffer/texture and when we are done drawing that framebuffer/texture that texture gets baked on the mesh.
+        // This happens in the bake Shader. There we check for every vertex (in screencoordinates) of the mesh if there is a color stored in the texture where that vertex is drawn on the screen. Then we draw this color in the UV coordinates of the mesh. 
+        // Hence we can look up the right color with the UV coordinates of the mesh.
         if (keys[GLFW_KEY_SPACE]) 
         {
+            // First we draw in the first framebuffer/texture 
             if (keys[GLFW_KEY_E])
             {
                 drawingShader.Use();
-                glUniform1f(glGetUniformLocation(drawingShader.Program, "pointSize"), pointSize);
-                glUniform3fv(glGetUniformLocation(drawingShader.Program, "colorIn"), 1, glm::value_ptr(brushColor));
+                glUniform1fv(glGetUniformLocation(drawingShader.Program, "colorIn"), 3 , brushColor);
 
-                drawPoint(paintTextureFBO);
+                glLineWidth(10.0f);
+                drawLines(paintTextureFBO);
                 bake = true;
             }
+            // then we bake that texture in UV coordinates
             else if (bake)
             {
-                glBindFramebuffer(GL_FRAMEBUFFER, bakeShadowMapFBO);
+                glBindFramebuffer(GL_FRAMEBUFFER, bakeDepthMapFBO);
                 glClear(GL_DEPTH_BUFFER_BIT);
+                // we need depth testing, so we dont draw through the texture 
+                // so we draw the scene from cameras perspektive to get a depthmap 
                 glEnable(GL_DEPTH_TEST);
                 mainShader.Use();
-                RenderObjects(mainShader, currentProgramInside, currentModelInside, planeModel, SHADOWMAP);
+                RenderObjects(mainShader, currentProgramInside, currentModelInside, SHADOWMAP);
 
-                glBindFramebuffer(GL_FRAMEBUFFER, bakeFramebuffer);
+                // then we bake using the bakeShader
+                glBindFramebuffer(GL_FRAMEBUFFER, bakeTextureFBO);
                 bakeShader.Use();
                 glUniformMatrix4fv(glGetUniformLocation(bakeShader.Program, "OrthoProj"), 1, GL_FALSE, glm::value_ptr(OrthoProj));
                 
+                // we have to disable face culling so we dont accidentally discard left facing triangles in UV coordinates
                 glDisable(GL_CULL_FACE);
-                RenderObjects(bakeShader, currentProgramInside, currentModelInside, planeModel, BAKE);
+                RenderObjects(bakeShader, currentProgramInside, currentModelInside, BAKE);
                 glEnable(GL_CULL_FACE);
 
+                // we bind the first framebuffer to clear its color buffer bit
                 glBindFramebuffer(GL_FRAMEBUFFER, paintTextureFBO);
                 glClear(GL_COLOR_BUFFER_BIT);
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
+                // set bake to false so we dont bake every frame
+                bake = false;
             }
             
         }
-        
-        /////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
+        /////////////////////////////////// IMGUI INTERFACE /////////////////////////////////////////////////////////////////////////////
         if (keys[GLFW_KEY_SPACE]) 
         {
-            toggleIMGui();
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            // ImGUI window creation
+            ImGui::Begin("Settings");
+            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+            ImGui::Text("Mouse position: (%.5f, %.5f)", mouseX, mouseY);
+            ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
+            // Text that appears in the window
+
+            ImGui::ColorEdit4("Set Modelcolor", myColor);
+            ImGui::SliderFloat("Repeat UV: ", &uvRep, 1.0f, 50.0f);
+            ImGui::SliderFloat("Line size: ", &lineSize, 0.01f, 0.1f);
+            ImGui::ColorEdit4("Set Brushcolor", brushColor);
+        
+            // Ends of imgui
+            ImGui::End();
+            // Renders the ImGUI elements
+            ImGui::Render();
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         // Swapping back and front buffers
         glfwSwapBuffers(window);
@@ -562,10 +632,11 @@ int main()
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    glDeleteFramebuffers(3, depthMapFBO);
+    // Delete the framebuffer
+    glDeleteFramebuffers(3, depthCubemapFBO);
     glDeleteFramebuffers(1, &paintTextureFBO);
-    glDeleteFramebuffers(1, &bakeFramebuffer);
-    glDeleteFramebuffers(1, &bakeShadowMapFBO);
+    glDeleteFramebuffers(1, &bakeTextureFBO);
+    glDeleteFramebuffers(1, &bakeDepthMapFBO);
 
 
     // we close and delete the created context
@@ -636,7 +707,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if(key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GL_TRUE);
 
-    // if P is pressed, we start/stop the animated rotation of models
+    // if P is pressed, we start/stop the animated rotation of the Light source
     if(key == GLFW_KEY_P && action == GLFW_PRESS)
         spinning=!spinning;
 
@@ -644,15 +715,15 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if(key == GLFW_KEY_L && action == GLFW_PRESS)
         wireframe=!wireframe;
 
-    // pressing a key between 1 and 5, we change the shader applied to the models
-    if((key >= GLFW_KEY_1 && key <= GLFW_KEY_8) && action == GLFW_PRESS)
+    // pressing a key between 1 and 8, we change the shader applied to the models inside the portal cube
+    /*if((key >= GLFW_KEY_1 && key <= GLFW_KEY_8) && action == GLFW_PRESS)
     {
         // "1" to "5" -> ASCII codes from 49 to 57
         // we subtract 48 (= ASCII CODE of "0") to have integers from 1 to 5
         // we subtract 1 to have indices from 0 to 4 in the shaders list
         currentProgramInside= (key-'0'-1);
         PrintCurrentShader(currentProgramInside);
-    }
+    }*/
 
     //Let the camara "walk" using w,a,s,d
     if(key == GLFW_KEY_W && action == GLFW_PRESS)
@@ -691,6 +762,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         keys[GLFW_KEY_D] = false;
     }
 
+    // When pressing E we start drawing. Releasing E wipes the history of mousepoints that were drawn
     if(key == GLFW_KEY_E && action == GLFW_PRESS)
     {
         keys[GLFW_KEY_E] = true;
@@ -702,7 +774,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         numMousePoints = 0;
     }
     
-
+    // pressing SPACE starts the draw Mode. It enables the cursor and sets firstMouse to true
     if(key == GLFW_KEY_SPACE && action == GLFW_PRESS)
     {
         keys[GLFW_KEY_SPACE] = !keys[GLFW_KEY_SPACE];
@@ -791,11 +863,12 @@ void Do_Movement()
     }
 }
 
-void ManagePortalContent() 
+void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFrontRight, GLint &currentModelBackLeft, GLint &currentModelFrontRight) 
 {
     glm::vec3 tempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(cameraPos,1.0f);
     glm::vec3 lasttempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(lastCameraPos,1.0f);
 
+    // walking to the Right
     if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 14.14f && tempRotatetCameraPos.z < 0.0f && lasttempRotatetCameraPos.z >= 0.0f)
     {
         currentProgramBackLeft += 4;
@@ -823,14 +896,44 @@ void ManagePortalContent()
             }
         }
     }
+
+    // walking to the left
+    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 14.14f && lasttempRotatetCameraPos.z < 0.0f && tempRotatetCameraPos.z >= 0.0f)
+    {
+        currentProgramBackLeft -= 4;
+        if (currentProgramBackLeft < 0)
+        {
+            currentProgramBackLeft += NumShader;
+            currentModelBackLeft -= 1;
+            if (currentModelBackLeft < 0)
+            {
+                currentModelBackLeft += NumModel;
+            }
+        }
+    }
+
+    if (-14.14f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && lasttempRotatetCameraPos.z > 0.0f && tempRotatetCameraPos.z <= 0.0f)
+    {
+        currentProgramFrontRight -= 4;
+        if (currentProgramFrontRight < 0)
+        {
+            currentProgramFrontRight += NumShader;
+            currentModelFrontRight -= 1;
+            if (currentModelFrontRight < 0 )
+            {
+                currentModelFrontRight += NumModel;
+            }
+        }
+    }
 }
 
-void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int modelType, Model &planeModel, GLuint VAO, int render_pass)
+void PortalRenderLoop(Shader &mainShader, GLint shaderIndex[], GLint modelType[], GLuint VAO, std::vector<GLuint> shortestIndices, int render_pass)
 {
-    vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
-    vector<glm::vec3> PortalRotationAxis = {glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
+    // set up Position and Rotationaxis for the Portals
+    vector<glm::vec3> PortalPos = {glm::vec3(0.0f,0.0f,5.0f), glm::vec3(5.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
+    vector<glm::vec3> PortalRotationAxis = {glm::vec3(-1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,1.0f), glm::vec3(1.0f,0.0f,0.0f),glm::vec3(0.0f,0.0f,-1.0f)};
 
-    for (int i = 0; i < 2; i++)
+    for (int i :shortestIndices)
     {
         // Lets do Portals 
         // Step One: Disable Color and Depth Buffer. Enable Stencil Buffer
@@ -840,29 +943,27 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int 
         glStencilMask(0xFF);
 
 
-        // Step Two: Set Stecnil Opereation to increasing when stencil test fails
+        // Step Two: Set Stecnil Opereation for front facing triangles to Replace when Stencil test and depth test are succesful
         glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
         glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
     
 
-        // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and increase the stencil value
+        // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and replace the stencil value with i+1
         glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
         glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
 
 
-        // Step Four: Draw Portal Frame
+        // Step Four: Draw Portal Frame in the stencil Buffer
+        // Note that every Portal has its own stencil value 
+
         // Set up ModelMatrix and Normalmatrix for the PortalFrame
         glm::mat4 planeModelMatrix = glm::mat4(1.0f);
-        glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(signum,signum,signum)*PortalPos[i]);
-        planeModelMatrix = glm::rotate(planeModelMatrix, signum * glm::radians(90.0f), PortalRotationAxis[i]);
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
+        planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(90.0f), PortalRotationAxis[i]);
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,10.0f,5.0f));
         
         //Send the Matrizes and the color Uniform to our mainShader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
 
@@ -883,7 +984,7 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int 
         
 
         // Step Seven: Draw what is inside of the Portal
-        RenderObjects(mainShader, shaderIndex + i, modelType, planeModel, render_pass);
+        RenderObjects(mainShader, shaderIndex[i < 2 ? 0 : 1] + (i % 2), modelType[i < 2 ? 0 : 1], render_pass);
 
         // Step Eight: Disable Color Buffer and Stencil Test but enable writing to the depth buffer
         glDisable(GL_STENCIL_TEST);
@@ -891,21 +992,19 @@ void PortalRenderLoop(Shader &mainShader, GLuint shaderIndex, float signum, int 
         glDepthMask(GL_TRUE);
 
 
-        // Step Nine: Draw our Portal againg. This time in the Depth Buffer
+        // Step Nine: Draw our Portal again. This time only in the Depth Buffer
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
-        planeNormalMatrix = glm::mat3(1.0f);
-        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(signum,signum,signum)*PortalPos[i]);
-        planeModelMatrix = glm::rotate(planeModelMatrix, signum * glm::radians(90.0f), PortalRotationAxis[i]);
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,1.0f,5.0f));
-        // and the NormalMatrix
-        planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
+        planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);
+        planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(90.0f), PortalRotationAxis[i]);
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(5.0f,10.0f,5.0f));
+
         //Send the Matrizes and the color Uniform to our mainSHader
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
@@ -917,15 +1016,15 @@ GLuint SetupPortal()
 {
     // Define Portals by hand 
     GLfloat vertices[] = {
-         1.0f,  0.0f,-1.0f,  // Top Right
-         1.0f,  0.0f, 1.0f,  // Bottom Right
-        -1.0f,  0.0f, 1.0f,  // Bottom Left
-        -1.0f,  0.0f,-1.0f   // Top Left
+         1.0f,  0.0f,-1.0f,  // Top Right       
+         1.0f,  0.0f, 1.0f,  // Bottom Right    
+        -1.0f,  0.0f, 1.0f,  // Bottom Left     
+        -1.0f,  0.0f,-1.0f,  // Top Left        
     };
 
     GLuint indices[] = {  // Note that we start from 0!
         0, 1, 2,  // First Triangle
-        2, 3, 0   // Second Triangle
+        2, 3, 0,  // Second Triangle
     };
 
     GLuint VBO, VAO, EBO;
@@ -944,63 +1043,55 @@ GLuint SetupPortal()
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);   
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0); // Note that this is allowed, the call to glVertexAttribPointer registered VBO as the currently bound vertex  buffer object so afterwards we can safely unbind  
+    glBindBuffer(GL_ARRAY_BUFFER, 0); 
 
-    glBindVertexArray(0); // Unbind VAO (it's always a good thing to unbind any buffer/array to prevent strange bugs), remember: do NOT unbind the EBO, keep it bound to this VAO
+    glBindVertexArray(0); 
 
     return VAO;
 }
 
-void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader)
+void setInsideShader(GLuint rightFrontShader, GLuint leftBackShader, GLint &currentProgramInside, GLint &currentModelInside, GLint &currentModelFrontRight, GLint &currentModelBackLeft)
 {
+    // set Inside Model and Shader equal to the FRONT FACING PORTAL, if we step through it (more precisely if we step through a barrier slietly infront of the portal)
     if(cameraPos.z < 5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z > 5.2f)
     {
         currentProgramInside = rightFrontShader;
         currentModelInside = currentModelFrontRight;
+        PrintCurrentShader(currentProgramInside);
+        PrintCurrentModel(currentModelInside);
     }
 
+    // set Inside Model and Shader equal to the RIGHT FACING PORTAL, if we step through it
     if(cameraPos.x < 5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x > 5.2f)
     {
         currentProgramInside = rightFrontShader +1;
         currentModelInside = currentModelFrontRight;
+        PrintCurrentShader(currentProgramInside);
+        PrintCurrentModel(currentModelInside);
     }
 
+    // set Inside Model and Shader equal to the BACK FACING PORTAL, if we step through it
     if(cameraPos.z > -5.2f && std::abs(cameraPos.x) <= 5.2f && lastCameraPos.z < -5.2f)
     {
         currentProgramInside = leftBackShader;
         currentModelInside = currentModelBackLeft;
+        PrintCurrentShader(currentProgramInside);
+        PrintCurrentModel(currentModelInside);
     }
     
+    // set Inside Model and Shader equal to the LEFT FACING PORTAL, if we step through it
     if(cameraPos.x > -5.2f && std::abs(cameraPos.z) <= 5.2f && lastCameraPos.x < -5.2f)
     {
         currentProgramInside = leftBackShader +1;
         currentModelInside = currentModelBackLeft;
+        PrintCurrentShader(currentProgramInside);
+        PrintCurrentModel(currentModelInside);
     }
 }
 
-void toggleIMGui()
+void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int render_pass)
 {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-    // ImGUI window creation
-    ImGui::Begin("Settings");
-    // Text that appears in the window
-    ImGui::ColorEdit4("Set Color", myColor);
-
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-                ImGui::GetIO().Framerate);
-    ImGui::Text("Mouse position: (%.5f, %.5f)", mouseX, mouseY);
-    ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
-    // Ends of imgui
-    ImGui::End();
-    // Renders the ImGUI elements
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-}
-
-void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model &planeModel, int render_pass, int loopIter)
-{
+    // when baking we only set up the paintTexture, bakeTexture and the bakeDepthMap and afterwards render the Model
     if (render_pass == BAKE)
     {
         glActiveTexture(GL_TEXTURE3);
@@ -1009,24 +1100,24 @@ void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model 
         glUniform1i(paintTextureLoc, 3); 
 
         glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_2D, meshTexture);
-        GLint meshTextureLoc = glGetUniformLocation(mainShader.Program, "meshTexture");
-        glUniform1i(meshTextureLoc, 4);
+        glBindTexture(GL_TEXTURE_2D, bakeTexture);
+        GLint bakeTextureLoc = glGetUniformLocation(mainShader.Program, "bakeTexture");
+        glUniform1i(bakeTextureLoc, 4);
 
         glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, bakeShadowMap);
-        GLint bakeShadowMapLoc = glGetUniformLocation(mainShader.Program, "bakeShadowMap");
-        glUniform1i(bakeShadowMapLoc, 5);
+        glBindTexture(GL_TEXTURE_2D, bakeDepthMap);
+        GLint bakeDepthMapLoc = glGetUniformLocation(mainShader.Program, "bakeDepthMap");
+        glUniform1i(bakeDepthMapLoc, 5);
 
-        glUniform2f(glGetUniformLocation(mainShader.Program, "screenScale"), 2.0 * screenWidth, 2.0 * screenHeight);
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "brushColor"), 1,  glm::value_ptr(brushColor));
 
     }
 
+    // in the render pass, we also set up and render every enviroment Model
     if (render_pass==RENDER)
     {
+        // pass the shadowMap texture to the shader
         glActiveTexture(GL_TEXTURE0 + modelType);
-        glBindTexture(GL_TEXTURE_2D, depthMap[modelType]);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap[modelType]);
         GLint shadowLocation = glGetUniformLocation(mainShader.Program, "shadowMap");
         glUniform1i(shadowLocation, modelType);
 
@@ -1049,7 +1140,7 @@ void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model 
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
-        planeModel.Draw();
+        envModels[Plane].Draw();
 
 
         // we set the Model and Normalmatrix for the smaller Floorplane
@@ -1067,19 +1158,42 @@ void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model 
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
-        planeModel.Draw();
+        envModels[Plane].Draw();
+
+        /*glm::vec3 wallPos[] = {glm::vec3(10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,10.0f), glm::vec3(-10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-10.0f)};
+        glm::vec3 wallRot[] = {glm::vec3(0.0f,0.0f, 1.0f), glm::vec3(-1.0f,0.0f, 0.0f), glm::vec3(0.0f,0.0f, -1.0f), glm::vec3(1.0f,0.0f, 0.0f)};
+
+        for (int i= 0; i<4; i++)
+        {
+            planeModelMatrix = glm::mat4(1.0f);
+            planeModelMatrix = glm::translate(planeModelMatrix, wallPos[i]);
+            planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(90.0f), wallRot[i]);
+            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+
+            glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+            glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+            envModels[Plane].Draw();
+        }*/
+
+        planeModelMatrix = glm::mat4(1.0f);
+        planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,10.0f,0.0f));
+        planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(180.0f), glm::vec3(1.0f,0.0f,0.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+        envModels[Plane].Draw();
 
         glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_2D, meshTexture);
-        GLint meshTextureLoc = glGetUniformLocation(mainShader.Program, "meshTexture");
-        glUniform1i(meshTextureLoc, 4);
+        glBindTexture(GL_TEXTURE_2D, bakeTexture);
+        GLint bakeTextureLoc = glGetUniformLocation(mainShader.Program, "bakeTexture");
+        glUniform1i(bakeTextureLoc, 4);
     }
 
+    // in every instance we render the Model
 
-    // Here we swap the subroutines in the fragment shader
-    // first search in the shader program the index corresponding to the portal loop
-    GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex+loopIter].c_str());
-    // then change the subroutine accordingly
+    // set up the subroutine
+    GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex].c_str());
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
     // set the Model and Normalmatrix for the model
@@ -1088,25 +1202,68 @@ void RenderObjects(Shader &mainShader, GLuint shaderIndex, int modelType, Model 
     ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
     //ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
     if (modelType == Bunny)
-        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.3f, 0.3f, 0.3f));
+        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.4f, 0.4f, 0.4f));
     else
-        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.8f, 0.8f, 0.8f));
+        ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.9f, 0.9f, 0.9f));
     NormalMatrix = glm::inverseTranspose(glm::mat3(view*ModelMatrix));
 
+    glUniform1f(glGetUniformLocation(mainShader.Program, "uvRep"), uvRep);
     glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(ModelMatrix));
     glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(NormalMatrix));
     glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
     glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
     glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
-    glUniform1f(glGetUniformLocation(mainShader.Program, "weight"), weight);
-    glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame*speed);
     models[modelType].Draw();
+
+    // set the subroutine to FULLCOLOR for the cylinders
+    index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
+    glm::vec3 cylinderPos[] = {glm::vec3(-5.0f,-2.0f,-5.0f), glm::vec3(5.0f,-2.0f,-5.0f), glm::vec3(-5.0f,-2.0f,5.0f), glm::vec3(5.0f,-2.0f,5.0f)};
+    for (int i =0; i<4; i++)
+    {
+        glm::mat4 cylinderModelMatrix = glm::mat4(1.0f);
+        cylinderModelMatrix = glm::translate(cylinderModelMatrix, cylinderPos[i]);
+        cylinderModelMatrix = glm::scale(cylinderModelMatrix, glm::vec3(0.001f, 0.01f, 0.001f));
+
+        glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(cylinderModelMatrix));
+        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorCylinder);
+        envModels[Cylinder].Draw();
+    }
+    
 }
 
-void drawPoint(GLuint framebuffer) {
+void drawLines(GLuint framebuffer) 
+{
     // Specify the vertex data
-    GLfloat vertices [4*numMousePoints];
-    std::copy(mouseHist.begin(), mouseHist.end(),vertices);
+    GLfloat vertices [4*numMousePoints] ;
+
+
+    for (int i = 0; i < numMousePoints; i++ )
+    {
+        if (i == 0)
+        {
+            vertices[4*i] = mouseHist[i] + lineSize;
+            vertices[4*i+1] = mouseHist[i+1] + lineSize;
+            vertices[4*i+2] = mouseHist[i] - lineSize;
+            vertices[4*i+3] = mouseHist[i+1] - lineSize;
+        } 
+
+
+        else 
+        {
+            glm::vec2 lastVert(mouseHist[2*i-2], mouseHist[2*i-1]);
+            glm::vec2 currentVert(mouseHist[2*i], mouseHist[2*i+1]);
+            glm::vec2 nextVert(mouseHist[2*i+2],mouseHist[2*i+3]);
+
+            glm::vec4 leftPerp = glm::normalize(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f,0.0f,1.0f)) * glm::vec4(glm::normalize(currentVert - lastVert), 0.0f ,0.0f));
+
+            vertices[4*i] = currentVert.x + lineSize * leftPerp.x;
+            vertices[4*i+1] = currentVert.y + lineSize * leftPerp.y;
+            vertices[4*i+2] = currentVert.x - lineSize * leftPerp.x;
+            vertices[4*i+3] = currentVert.y - lineSize * leftPerp.y;
+        }
+    }
 
     GLuint VBO, VAO;
     glGenVertexArrays(1, &VAO);
@@ -1122,14 +1279,50 @@ void drawPoint(GLuint framebuffer) {
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     // Draw the point
-    glDrawArrays(GL_POINTS, 0, numMousePoints);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 2 * numMousePoints - 2);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     // Draw the point
-    glDrawArrays(GL_POINTS, 0, numMousePoints);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 2 * numMousePoints - 2);
     glBindVertexArray(0);
+
 
     // Cleanup
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
+ 
+}
+
+std::vector<GLuint> nearestPortals(glm::vec3 cameraPos)
+{
+    std::vector<GLuint> index;
+    GLuint tempIndex;
+    glm::vec3 portalPos[] = {glm::vec3(0.0f,0.0f,5.0f), glm::vec3(5.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
+    GLfloat compareDist = std::numeric_limits<GLfloat>::max();
+
+    for (int i = 0; i<4 ;i++)
+    {
+        GLfloat tempDist = glm::length(cameraPos - portalPos[i]);
+        if (tempDist < compareDist)
+        {
+            compareDist = tempDist;
+            tempIndex = i;
+        }
+    }
+    index.push_back(tempIndex);
+
+    compareDist = std::numeric_limits<GLfloat>::max();
+    for (int i = 0; i<4 ;i++)
+    {
+        GLfloat tempDist = glm::length(cameraPos - portalPos[i]);
+        if (tempDist < compareDist && i != index[0])
+        {
+            compareDist = tempDist;
+            tempIndex = i;
+        }
+            
+    }
+    index.push_back(tempIndex);
+    
+    return index;
 }
