@@ -39,10 +39,10 @@
 
 
 // dimensions of application's window
-GLuint screenWidth = 1200, screenHeight = 900;
+GLuint screenWidth = 1000, screenHeight = 600;
 const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 
-///////////////////////////////////INITIALISE FUNCTIONS//////////////////////////////////////////////////////////////////////
+/////////////////////////////////// DEKLARE FUNCTIONS//////////////////////////////////////////////////////////////////////
 // callback functions for keyboard events
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 
@@ -80,6 +80,7 @@ void drawLines(GLuint framebuffer);
 // calculate the nearest two portals
 std::vector<GLuint> nearestPortals(glm::vec3 cameraPos);
 
+// we load the textures and them up as opengl textures
 GLint LoadTexture(const char* path);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -104,11 +105,11 @@ GLboolean wireframe = GL_FALSE;
 // the different Render passes
 enum render_passes{ SHADOWMAP, RENDER, BAKE};
 
-enum textureIDs {WOOD, CARPET, MARPLE, CONCRETE};
+enum textureIDs {WOOD, MARPLE, WALL, CONCRETE};
 
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, Normal2ColorPlusLambertian, Normal2ColorPlusBlinnPhong, UV2ColorPlusLambertian,UV2ColorPlusBlinnPhong, FULLCOLOR, Bloom, Texture };
-const int NumShader = 4;
+enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, NCAPlusBlinnPhong, TAPlusBlinnPhong, StripesSmoothstepPlusBlinnPhong, CirclesSmoothstepPlusBlinnPhong, FULLCOLOR, Bloom, Texture };
+const int NumShader = 8;
 
 enum availabe_Models{Bunny, Cube, Sphere};
 const int NumModel = 3;
@@ -117,7 +118,7 @@ const int NumModel = 3;
 enum enviromentModels{Plane, Cylinder, Room, Lightbulb};
 
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Normal2ColorPlusLambertian", "Normal2ColorPlusBlinnPhong", "UV2ColorPlusLambertian", "UV2ColorPlusBlinnPhong", "FULLCOLOR", "Bloom", "Texture"};
+const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "NoiseColorAnimated plus BlinnPhong", "TurbulanceAbs plus BlinnPhong", "StripesSmoothstepPlusBlinnPhong", "CirclesSmoothstepPlusBlinnPhong", "FULLCOLOR", "Bloom", "Texture"};
 const char * print_availabe_Models[] = {"Bunny", "Cube", "Sphere"};
 
 // a vector for all the Shader Programs, models and enviroment models used and swapped in the application
@@ -138,7 +139,7 @@ GLfloat colorCylinder[] = {0.1f, 0.1f, 0.1f};
 bool keys[1024] = {0};
 
 // position of the Light
-glm::vec3 lightPos = glm::vec3(0.0f,4.0f,4.0f);
+glm::vec3 lightPos = glm::vec3(0.0f,6.0f,4.0f);
 
 // initialise the camera 
 glm::vec3 cameraPos;
@@ -181,8 +182,15 @@ GLuint bakeDepthMap;
 // initialise Informations for texture drawing
 GLfloat brushColor[] = {0.0f,1.0f,0.0f};
 float uvRep = 1.0;
-float lineSize = 0.01;
+float lineSize = 0.04;
 bool bake = false;
+
+// frequency and power parameters for noise generation (for random pattern subroutines)
+GLfloat frequency = 10.0;
+GLfloat power = 1.0;
+// number of harmonics (used in the turbulence-based subroutine)
+GLfloat harmonics = 4.0;
+GLfloat timer;
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -274,8 +282,8 @@ int main()
     envModels.push_back(std::move(lightbulbModel));
 
     textureId.push_back(LoadTexture("textures/darkWood.png"));
-    textureId.push_back(LoadTexture("textures/darkWood.png"));
-    textureId.push_back(LoadTexture("textures/whiteMarple.png"));
+    textureId.push_back(LoadTexture("textures/marple.jpg"));
+    textureId.push_back(LoadTexture("textures/brickWall.jpg"));
     textureId.push_back(LoadTexture("textures/crackedConcrete.png"));
 
 
@@ -284,7 +292,7 @@ int main()
 
     // we set the initial indices for the shaders and models shown in the FRONT/RIGHT, BACK/LEFT portal and what is inside
     GLint currentProgramFrontRight = LambertianPlusShadow;
-    GLint currentProgramBackLeft = BlinnPhongPlusShadow;
+    GLint currentProgramBackLeft = StripesSmoothstepPlusBlinnPhong;
     GLint currentProgramInside = LambertianPlusShadow;
     GLint currentModelFrontRight = Bunny;
     GLint currentModelBackLeft = Sphere;
@@ -543,6 +551,12 @@ int main()
         glUniform1f(glGetUniformLocation(mainShader.Program, "Kd"), Kd);
         glUniform1f(glGetUniformLocation(mainShader.Program, "Ks"), Ks);
 
+        // send the uniforms containing informations for the random patterns
+        glUniform1f(glGetUniformLocation(mainShader.Program, "frequency"), frequency);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "power"), power);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "timer"), currentFrame);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "harmonics"), harmonics);
+
         
         GLint portalShader[] = {currentProgramFrontRight, currentProgramBackLeft};
         GLint portalModel[] = {currentModelFrontRight,currentModelBackLeft};
@@ -613,16 +627,27 @@ int main()
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
             // ImGUI window creation
-            ImGui::Begin("Settings");
+            ImGui::Begin("Performance");
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
             ImGui::Text("Mouse position: (%.5f, %.5f)", mouseX, mouseY);
             ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
-            // Text that appears in the window
-
+           
+            ImGui::Separator();
+            ImGui::Text("Paintint Options: ");
             ImGui::ColorEdit4("Set Modelcolor", myColor);
             ImGui::SliderFloat("Repeat UV: ", &uvRep, 1.0f, 50.0f);
             ImGui::SliderFloat("Line size: ", &lineSize, 0.01f, 0.1f);
             ImGui::ColorEdit4("Set Brushcolor", brushColor);
+
+            ImGui::Separator();
+            ImGui::Text("Lightning Options: ");
+            ImGui::SliderFloat("Light Height: ", &lightPos.y, 1.0f, 7.0f);
+            ImGui::SliderFloat("Kd: ", &Kd, 0.0f, 1.0f);
+            ImGui::SliderFloat("Ks: ", &Ks, 0.0f, 1.0f);
+            ImGui::SliderFloat("Ka: ", &Ka, 0.0f, 1.0f);
+            ImGui::SliderFloat("Shininess: ", &shininess, 10.0f, 100.0f);
+            ImGui::SliderFloat("Roughness Index: ", &alpha, 0.0f, 1.0f);
+            ImGui::SliderFloat("Fresnel: ", &F0, 0.0f, 1.0f);
         
             // Ends of imgui
             ImGui::End();
@@ -662,8 +687,7 @@ int main()
 }
 
 
-//////////////////////////////////////////
-// we create and compile shaders (code of Shader class is in include/utils/shader.h), and we add them to the list of available shaders
+//////////////////////////////////////////////////////// DEFINITION OF FUNCTIONS /////////////////////////////////////////////////////////////////////
 void SetupShaders(int program)
 {
     int maxSub, maxSubU, countActiveSU;
@@ -703,8 +727,6 @@ void SetupShaders(int program)
 
 }
 
-//////////////////////////////////////////
-// we print on console the name of the currently used shader
 void PrintCurrentShader(int shader)
 {
     std::cout << "Current shader: " << print_available_ShaderPrograms[shader]  << std::endl;
@@ -716,8 +738,6 @@ void PrintCurrentModel(int model)
     std::cout << "Current Model: " << print_availabe_Models[model] << std::endl;
 }
 
-//////////////////////////////////////////
-// callback for keyboard events
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
     // if ESC is pressed, we close the application
@@ -731,16 +751,6 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     // if L is pressed, we activate/deactivate wireframe rendering of models
     if(key == GLFW_KEY_L && action == GLFW_PRESS)
         wireframe=!wireframe;
-
-    // pressing a key between 1 and 8, we change the shader applied to the models inside the portal cube
-    /*if((key >= GLFW_KEY_1 && key <= GLFW_KEY_8) && action == GLFW_PRESS)
-    {
-        // "1" to "5" -> ASCII codes from 49 to 57
-        // we subtract 48 (= ASCII CODE of "0") to have integers from 1 to 5
-        // we subtract 1 to have indices from 0 to 4 in the shaders list
-        currentProgramInside= (key-'0'-1);
-        PrintCurrentShader(currentProgramInside);
-    }*/
 
     //Let the camara "walk" using w,a,s,d
     if(key == GLFW_KEY_W && action == GLFW_PRESS)
@@ -808,10 +818,10 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     }
 }
 
-//Mouse Inputs 
 void mouse_callback(GLFWwindow* window, double xPos, double yPos)
 {   
     glfwGetCursorPos(window, &xPos, &yPos);
+    // when not in draw Mode we adjust the angle of the camera by the differene of mouse positions from the last frame to the current frame
     if (!keys[GLFW_KEY_SPACE])
     {
 
@@ -838,16 +848,15 @@ void mouse_callback(GLFWwindow* window, double xPos, double yPos)
             verticalAngle = -1.57f;
         }
 
-        // use glm::Radians to avoid turning the camera upside down i guess
         cameraView = glm::normalize(glm::vec3(cos(verticalAngle) * sin(horizontalAngle), sin(verticalAngle), cos(verticalAngle)*cos(horizontalAngle)));
         cameraRight = glm::normalize(glm::vec3(sin(horizontalAngle - 3.14f/2.0f), 0, cos(horizontalAngle - 3.14f/2.0f)));
         cameraUp = glm::cross(cameraRight, cameraView);
     }
-
     mouseX = (float)(2 * xPos) / screenWidth - 1.0f;
     mouseY = 1.0f - (float)(2 * yPos) / screenHeight;
 
-    if (keys[GLFW_KEY_E]) 
+    // when pressing E in Draw Mode we store the Mouse positions in the mouseHist vector, so we can use them later to draw lines
+    if (keys[GLFW_KEY_SPACE] && keys[GLFW_KEY_E]) 
     {
         mouseHist.push_back(mouseX);
         mouseHist.push_back(mouseY);
@@ -858,35 +867,53 @@ void mouse_callback(GLFWwindow* window, double xPos, double yPos)
 
 void Do_Movement()
 {
-     //Let the camara "walk" using w,a,s,d
+     // Let the camara "walk" using w,a,s,d
+     // we stop the camera movement when the new camera position is outside the outer walls
     if(keys[GLFW_KEY_W] == true)
     {
-        cameraPos = cameraPos + glm::normalize(glm::vec3(cameraView.x,0,cameraView.z)) * 3.0f * deltaTime;
+        glm::vec3 newCameraPos = cameraPos + glm::normalize(glm::vec3(cameraView.x,0,cameraView.z)) * 3.0f * deltaTime;
+        if (std::abs(newCameraPos.x) < 13.8f && std::abs(newCameraPos.z) < 13.8f)
+        {
+            cameraPos = newCameraPos;
+        }
     }
     if(keys[GLFW_KEY_A] == true)
     {
-        cameraPos = cameraPos - glm::normalize(glm::vec3(cameraRight.x,0,cameraRight.z)) * 3.0f * deltaTime;
+        glm::vec3 newCameraPos = cameraPos - glm::normalize(glm::vec3(cameraRight.x,0,cameraRight.z)) * 3.0f * deltaTime;
+        if (std::abs(newCameraPos.x) < 13.8f && std::abs(newCameraPos.z) < 13.8f)
+        {
+            cameraPos = newCameraPos;
+        }
 
     }
     if(keys[GLFW_KEY_S] == true)
     {
-        cameraPos = cameraPos - glm::normalize(glm::vec3(cameraView.x,0,cameraView.z)) * 3.0f * deltaTime;
+        glm::vec3 newCameraPos = cameraPos - glm::normalize(glm::vec3(cameraView.x,0,cameraView.z)) * 3.0f * deltaTime;
+        if (std::abs(newCameraPos.x) < 13.8f && std::abs(newCameraPos.z) < 13.8f)
+        {
+            cameraPos = newCameraPos;
+        }
 
     }
     if(keys[GLFW_KEY_D] == true)
     {
-        cameraPos = cameraPos + glm::normalize(glm::vec3(cameraRight.x,0,cameraRight.z)) * 3.0f * deltaTime;
+        glm::vec3 newCameraPos = cameraPos + glm::normalize(glm::vec3(cameraRight.x,0,cameraRight.z)) * 3.0f * deltaTime;
+        if (std::abs(newCameraPos.x) < 13.8f && std::abs(newCameraPos.z) < 13.8f)
+        {
+            cameraPos = newCameraPos;
+        }
 
     }
 }
 
 void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFrontRight, GLint &currentModelBackLeft, GLint &currentModelFrontRight) 
 {
+    // we rotate the camera, such that checking if we walk around the front-right and back-left corners is equal to checking if we cross the x - Axis
     glm::vec3 tempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(cameraPos,1.0f);
     glm::vec3 lasttempRotatetCameraPos = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f,1.0f,0.0f)) * glm::vec4(lastCameraPos,1.0f);
 
-    // walking to the Right
-    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 14.14f && tempRotatetCameraPos.z < 0.0f && lasttempRotatetCameraPos.z >= 0.0f)
+    // when crossing the x - Axis on the right side and walking from negativ to positiv we increase the shader program in the back left corner
+    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 19.8f && tempRotatetCameraPos.z < 0.0f && lasttempRotatetCameraPos.z >= 0.0f)
     {
         currentProgramBackLeft += 4;
         if (currentProgramBackLeft >= NumShader)
@@ -900,7 +927,8 @@ void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFro
         }
     }
 
-    if (-14.14f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && tempRotatetCameraPos.z > 0.0f && lasttempRotatetCameraPos.z <= 0.0f)
+    // when crossing the x - Axis on the left side and walking from negativ to positiv we increase the shader program in the front right corner
+    if (-19.8f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && tempRotatetCameraPos.z > 0.0f && lasttempRotatetCameraPos.z <= 0.0f)
     {
         currentProgramFrontRight += 4;
         if (currentProgramFrontRight >= NumShader)
@@ -914,8 +942,8 @@ void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFro
         }
     }
 
-    // walking to the left
-    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 14.14f && lasttempRotatetCameraPos.z < 0.0f && tempRotatetCameraPos.z >= 0.0f)
+    // when crossing the x - Axis on the right side and walking from negativ to positiv we decrease the shader program in the back left corner
+    if (7.0f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < 19.8f && lasttempRotatetCameraPos.z < 0.0f && tempRotatetCameraPos.z >= 0.0f)
     {
         currentProgramBackLeft -= 4;
         if (currentProgramBackLeft < 0)
@@ -929,7 +957,8 @@ void ManagePortalContent(GLint &currentProgramBackLeft, GLint &currentProgramFro
         }
     }
 
-    if (-14.14f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && lasttempRotatetCameraPos.z > 0.0f && tempRotatetCameraPos.z <= 0.0f)
+    // when crossing the x - Axis on the left side and walking from negativ to positiv we decrease the shader program in the front right corner
+    if (-19.8f < tempRotatetCameraPos.x && tempRotatetCameraPos.x < -7.0f && lasttempRotatetCameraPos.z > 0.0f && tempRotatetCameraPos.z <= 0.0f)
     {
         currentProgramFrontRight -= 4;
         if (currentProgramFrontRight < 0)
@@ -1031,7 +1060,7 @@ void PortalRenderLoop(Shader &mainShader, GLint shaderIndex[], GLint modelType[]
 
 GLuint SetupPortal()
 {
-    // Define Portals by hand 
+    // Define Portals by hand and set up VAO, VBO, EBO
     GLfloat vertices[] = {
          1.0f,  0.0f,-1.0f,  // Top Right       
          1.0f,  0.0f, 1.0f,  // Bottom Right    
@@ -1039,7 +1068,7 @@ GLuint SetupPortal()
         -1.0f,  0.0f,-1.0f,  // Top Left        
     };
 
-    GLuint indices[] = {  // Note that we start from 0!
+    GLuint indices[] = {  
         0, 1, 2,  // First Triangle
         2, 3, 0,  // Second Triangle
     };
@@ -1049,7 +1078,6 @@ GLuint SetupPortal()
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
 
-    // Bind the Vertex Array Object first, then bind and set vertex buffer(s) and attribute pointer(s).
     glBindVertexArray(VAO); 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW); 
@@ -1110,7 +1138,7 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
 {
     // when baking we only set up the paintTexture, bakeTexture and the bakeDepthMap and afterwards render the Model
     if (render_pass == BAKE)
-    {
+    {   
         glActiveTexture(GL_TEXTURE3);
         glBindTexture(GL_TEXTURE_2D, paintTexture);
         GLint paintTextureLoc = glGetUniformLocation(mainShader.Program, "paintTexture");
@@ -1138,21 +1166,24 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         GLint shadowLocation = glGetUniformLocation(mainShader.Program, "shadowMap");
         glUniform1i(shadowLocation, modelType);
 
+        ////////////////////////////////// RENDER THE LIGHTBULB ////////////////////////////////////////////////////////////////////////
         GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[Bloom].c_str());
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
         glm::mat4 lightbulbModelMatrix = glm::mat4(1.0f);
         lightbulbModelMatrix = glm::translate(lightbulbModelMatrix, lightPos);
-        //lightbulbModelMatrix = glm::rotate(lightbulbModelMatrix, glm::radians(180.0f), glm::vec3(1.0f,0.0f,0.0f));
         lightbulbModelMatrix = glm::scale(lightbulbModelMatrix, glm::vec3(0.1f,0.13f,0.1f));
 
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(lightbulbModelMatrix));
         models[Sphere].Draw();
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+        
         // set the subroutine to Texture for the FLoorplanes
         index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[Texture].c_str());
         glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
+        /////////////////////////////////// RENDER THE LARGER FLOOR PLANE //////////////////////////////////////////////////////////////
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, textureId[WOOD]);
         GLint textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
@@ -1162,9 +1193,7 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glm::mat4 planeModelMatrix = glm::mat4(1.0f);
         glm::mat3 planeNormalMatrix = glm::mat3(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-1.0f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        // and the NormalMatrix
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.8f,1.0f,2.8f));
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
 
         //Send the Matrizes and the color Uniform to our mainShader
@@ -1172,9 +1201,12 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorDarkRed);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "texRep"), 15.0);
         envModels[Plane].Draw();
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+        ////////////////////////////////// RENDER THE SMALLER FLOOR PLANE //////////////////////////////////////////////////////////////
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D, textureId[MARPLE]);
         textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
@@ -1185,8 +1217,6 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         planeNormalMatrix = glm::mat3(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,-0.999f,0.0f));
         planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(1.0f,1.0f,1.0f));
-        //planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(0.0f), glm::vec3(0.0f,0.0f,0.0f));
-        // and the NormalMatrix
         planeNormalMatrix = glm::inverseTranspose(glm::mat3(view*planeModelMatrix));
 
         //Send the Matrizes and the color Uniform to our mainShader
@@ -1194,43 +1224,54 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniformMatrix3fv(glGetUniformLocation(mainShader.Program, "normalMatrix"), 1, GL_FALSE, glm::value_ptr(planeNormalMatrix));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "projectionMatrix"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "texRep"), 3.0);
         envModels[Plane].Draw();
-        
-        /*
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+        ///////////////////////////////// RENDER THE WALLS /////////////////////////////////////////////////////////////////////////////
         glActiveTexture(GL_TEXTURE8);
-        glBindTexture(GL_TEXTURE_2D, textureId[MARPLE]);
+        glBindTexture(GL_TEXTURE_2D, textureId[WALL]);
         textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
         glUniform1i(textureLocation, 8);
-        glm::vec3 wallPos[] = {glm::vec3(10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,10.0f), glm::vec3(-10.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-10.0f)};
-        glm::vec3 wallRot[] = {glm::vec3(0.0f,0.0f, 1.0f), glm::vec3(-1.0f,0.0f, 0.0f), glm::vec3(0.0f,0.0f, -1.0f), glm::vec3(1.0f,0.0f, 0.0f)};
 
+        //set up wall position, rotation axis and angle 
+        glm::vec3 wallPos[] = {glm::vec3(14.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,14.0f), glm::vec3(-14.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-14.0f)};
+        glm::vec3 wallRot[] = {glm::vec3(0.0f,0.0f, 1.0f), glm::vec3(0.5773503f, -0.5773503f, 0.5773503f), glm::vec3(0.0f,0.0f, -1.0f), glm::vec3(-0.5773503f, 0.5773503f, 0.5773503f)};
+        float wallRotations[] = {glm::radians(90.0f), glm::radians(240.0f), glm::radians(90.0f), glm::radians(240.0f)};
+
+        // set up and send the Modelmatrix for the Walls to the shader and render them
         for (int i= 0; i<4; i++)
         {
             planeModelMatrix = glm::mat4(1.0f);
             planeModelMatrix = glm::translate(planeModelMatrix, wallPos[i]);
-            planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(90.0f), wallRot[i]);
-            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+            planeModelMatrix = glm::rotate(planeModelMatrix, wallRotations[i], wallRot[i]);
+            planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(3.0f,1.0f,3.0f));
 
             glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-            glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+            glUniform1f(glGetUniformLocation(mainShader.Program, "texRep"), 8.0);
             envModels[Plane].Draw();
-        }*/
+        }
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+        ///////////////////////////////// RENDER THE CEILING //////////// //////////////////////////////////////////////////////////////
         glActiveTexture(GL_TEXTURE9);
         glBindTexture(GL_TEXTURE_2D, textureId[CONCRETE]);
         textureLocation = glGetUniformLocation(mainShader.Program, "textureID");
         glUniform1i(textureLocation, 9);
 
+        // set up Modelmatrix for the ceiling 
         planeModelMatrix = glm::mat4(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, glm::vec3(0.0f,10.0f,0.0f));
         planeModelMatrix = glm::rotate(planeModelMatrix, glm::radians(180.0f), glm::vec3(1.0f,0.0f,0.0f));
-        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.0f,1.0f,2.0f));
+        planeModelMatrix = glm::scale(planeModelMatrix, glm::vec3(2.8f,1.0f,2.8f));
 
+        // send the Modelmatrix to the Shader and render the ceiling
         glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(planeModelMatrix));
-        glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorSandstone);
+        glUniform1f(glGetUniformLocation(mainShader.Program, "texRep"), 5.0);
         envModels[Plane].Draw();
-
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, bakeTexture);
@@ -1238,6 +1279,7 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniform1i(bakeTextureLoc, 4);
     }
 
+    ////////////////////////////////// RENDER THE MAIN MODEL ///////////////////////////////////////////////////////////////////////////
     // set up the subroutine
     GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[shaderIndex].c_str());
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
@@ -1246,7 +1288,6 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
     glm::mat4 ModelMatrix = glm::mat4(1.0f);
     glm::mat3 NormalMatrix = glm::mat3(1.0f);
     ModelMatrix = glm::translate(ModelMatrix, glm::vec3(0.0f,0.0f,0.0f));
-    //ModelMatrix = glm::rotate(ModelMatrix, glm::radians(orientationY), glm::vec3(0.0f, 1.0f, 0.0f));
     if (modelType == Bunny)
         ModelMatrix = glm::scale(ModelMatrix, glm::vec3(0.4f, 0.4f, 0.4f));
     else
@@ -1260,11 +1301,15 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
     glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "viewMatrix"), 1, GL_FALSE, glm::value_ptr(view));
     glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, myColor);
     models[modelType].Draw();
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+    ////////////////////////////////////// RENDER THE PILLAR CYLINDERS ////////////////////////////////////////////////////////////////
     // set the subroutine to FULLCOLOR for the cylinders
     index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
+    // set up the Modelmatrix for every cylinder in each corner, send it to the shader and render
     glm::vec3 cylinderPos[] = {glm::vec3(-5.0f,-2.0f,-5.0f), glm::vec3(5.0f,-2.0f,-5.0f), glm::vec3(-5.0f,-2.0f,5.0f), glm::vec3(5.0f,-2.0f,5.0f)};
     for (int i =0; i<4; i++)
     {
@@ -1276,7 +1321,10 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
         glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorCylinder);
         envModels[Cylinder].Draw();
     }
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+    ///////////////////////////////////// RENDER THE SMALL CYLINDER FOR THE LIGHTBULB /////////////////////////////////////////////////
+    // set the Modelmatrix for the "coord of the Lightbulb", send it to the shader and render
     glm::mat4 cylinderModelMatrix = glm::mat4(1.0f);
     cylinderModelMatrix = glm::translate(cylinderModelMatrix, lightPos + glm::vec3(0.0f,0.15f,0.0f));
     cylinderModelMatrix = glm::scale(cylinderModelMatrix, glm::vec3(0.0001f, 0.01f, 0.0001f));
@@ -1284,15 +1332,16 @@ void RenderObjects(Shader &mainShader, GLint shaderIndex, GLint modelType, int r
     glUniformMatrix4fv(glGetUniformLocation(mainShader.Program, "modelMatrix"), 1, GL_FALSE, glm::value_ptr(cylinderModelMatrix));
     glUniform3fv(glGetUniformLocation(mainShader.Program, "colorIn"), 1, colorCylinder);
     envModels[Cylinder].Draw();
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     
 }
 
 void drawLines(GLuint framebuffer) 
 {
-    // Specify the vertex data
+    // set up the vertices Array
     GLfloat vertices [4*numMousePoints] ;
 
-
+    // for every Mouse point in mouseHist we calculate the direction (difference from current mousepoint to last mousepoint) and store two mouse perpenticular to the direction with distance 2*linesize in vertices
     for (int i = 0; i < numMousePoints; i++ )
     {
         if (i == 0)
@@ -1319,6 +1368,7 @@ void drawLines(GLuint framebuffer)
         }
     }
 
+    // then we set up a VBO and VAO to render these vertices as triangle strips
     GLuint VBO, VAO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -1330,13 +1380,12 @@ void drawLines(GLuint framebuffer)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (void*)0);
     glEnableVertexAttribArray(0);
     
-
+    // we render them once in the paint framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    // Draw the point
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 2 * numMousePoints - 2);
 
+    // and once in the normal framebuffer, so the user can see the paint strokes
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    // Draw the point
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 2 * numMousePoints - 2);
     glBindVertexArray(0);
 
@@ -1349,6 +1398,7 @@ void drawLines(GLuint framebuffer)
 
 std::vector<GLuint> nearestPortals(glm::vec3 cameraPos)
 {
+    // We find the nearest two portals to the camera position 
     std::vector<GLuint> index;
     GLuint tempIndex;
     glm::vec3 portalPos[] = {glm::vec3(0.0f,0.0f,5.0f), glm::vec3(5.0f,0.0f,0.0f), glm::vec3(0.0f,0.0f,-5.0f), glm::vec3(-5.0f,0.0f,0.0f)};
@@ -1393,15 +1443,18 @@ GLint LoadTexture(const char* path)
 
     glGenTextures(1, &textureImage);
     glBindTexture(GL_TEXTURE_2D, textureImage);
+
     // 3 channels = RGB ; 4 channel = RGBA
     if (channels==3)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
     else if (channels==4)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
     glGenerateMipmap(GL_TEXTURE_2D);
+
     // we set how to consider UVs outside [0,1] range
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
     // we set the filtering for minification and magnification
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST_MIPMAP_NEAREST);
