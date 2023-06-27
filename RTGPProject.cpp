@@ -39,7 +39,7 @@
 
 
 // dimensions of application's window
-GLuint screenWidth = 1000, screenHeight = 600;
+GLuint screenWidth = 800, screenHeight = 600;
 const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 
 /////////////////////////////////// DEKLARE FUNCTIONS//////////////////////////////////////////////////////////////////////
@@ -108,7 +108,7 @@ enum render_passes{ SHADOWMAP, RENDER, BAKE};
 enum textureIDs {WOOD, MARPLE, WALL, CONCRETE};
 
 // enum data structure to manage indices for shaders swapping
-enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, NCAPlusBlinnPhong, TAPlusBlinnPhong, StripesSmoothstepPlusBlinnPhong, CirclesSmoothstepPlusBlinnPhong, FULLCOLOR, Bloom, Texture };
+enum available_ShaderPrograms{LambertianPlusShadow, PhongPlusShadow, BlinnPhongPlusShadow, GGXPlusShadow, AnimatedCellsPlusGGX, AnimatedColorsPlusGGX, StripesSmoothstepPlusGGX, CirclesSmoothstepPlusGGX, FULLCOLOR, Bloom, Texture };
 const int NumShader = 8;
 
 enum availabe_Models{Bunny, Cube, Sphere};
@@ -118,7 +118,7 @@ const int NumModel = 3;
 enum enviromentModels{Plane, Cylinder, Room, Lightbulb};
 
 // strings with shaders names to print the name of the current one on console
-const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "NoiseColorAnimated plus BlinnPhong", "TurbulanceAbs plus BlinnPhong", "StripesSmoothstepPlusBlinnPhong", "CirclesSmoothstepPlusBlinnPhong", "FULLCOLOR", "Bloom", "Texture"};
+const char * print_available_ShaderPrograms[] = { "Lambertian", "Phong", "BlinnPhong", "GGX", "Animated Cells Plus GGX", "Animated Colors Plus GGX", "Stripes Smoothstep Plus GGX", "Circles Smoothstep Plus GGX", "FULLCOLOR", "Bloom", "Texture"};
 const char * print_availabe_Models[] = {"Bunny", "Cube", "Sphere"};
 
 // a vector for all the Shader Programs, models and enviroment models used and swapped in the application
@@ -186,10 +186,10 @@ float lineSize = 0.04;
 bool bake = false;
 
 // frequency and power parameters for noise generation (for random pattern subroutines)
-GLfloat frequency = 10.0;
-GLfloat power = 1.0;
+GLfloat frequency = 15.0;
+GLfloat power = 2.5;
 // number of harmonics (used in the turbulence-based subroutine)
-GLfloat harmonics = 4.0;
+GLfloat harmonics = 1.0;
 GLfloat timer;
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -292,7 +292,7 @@ int main()
 
     // we set the initial indices for the shaders and models shown in the FRONT/RIGHT, BACK/LEFT portal and what is inside
     GLint currentProgramFrontRight = LambertianPlusShadow;
-    GLint currentProgramBackLeft = StripesSmoothstepPlusBlinnPhong;
+    GLint currentProgramBackLeft = StripesSmoothstepPlusGGX;
     GLint currentProgramInside = LambertianPlusShadow;
     GLint currentModelFrontRight = Bunny;
     GLint currentModelBackLeft = Sphere;
@@ -339,7 +339,7 @@ int main()
     // roughness index for GGX shader
     GLfloat alpha = 0.2f;
     // Fresnel reflectance at 0 degree (Schlik's approximation)
-    GLfloat F0 = 0.9f;
+    GLfloat F0 = 0.45f;
 
     /////////////////// CREATION OF BUFFER FOR THE  DEPTH MAP ///////////////////////////////////////////////////////
     GLuint depthCubemapFBO[3];
@@ -353,8 +353,8 @@ int main()
         for (unsigned int i = 0; i < 6; ++i)
         {
             glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE); 
@@ -379,7 +379,7 @@ int main()
     glBindTexture(GL_TEXTURE_2D, paintTexture);
 
     
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB,  2 * screenWidth,  2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB,  width,  height, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -404,10 +404,10 @@ int main()
     glBindTexture(GL_TEXTURE_2D, bakeTexture);
 
     std::vector<GLubyte> whiteTextureData( 4 *screenWidth *  screenHeight * 3, 255);
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 2 *  screenWidth, 2 * screenHeight, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, width, height, 0,GL_RGB, GL_UNSIGNED_BYTE, NULL);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
@@ -429,7 +429,7 @@ int main()
     glGenTextures(1, &bakeDepthMap);
     glBindTexture(GL_TEXTURE_2D, bakeDepthMap);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,  2*screenWidth, 2*screenHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,  width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -583,8 +583,6 @@ int main()
             {
                 drawingShader.Use();
                 glUniform1fv(glGetUniformLocation(drawingShader.Program, "colorIn"), 3 , brushColor);
-
-                glLineWidth(10.0f);
                 drawLines(paintTextureFBO);
                 bake = true;
             }
@@ -597,7 +595,7 @@ int main()
                 // so we draw the scene from cameras perspektive to get a depthmap 
                 glEnable(GL_DEPTH_TEST);
                 mainShader.Use();
-                RenderObjects(mainShader, currentProgramInside, currentModelInside, SHADOWMAP);
+                RenderObjects(mainShader, FULLCOLOR, currentModelInside, SHADOWMAP);
 
                 // then we bake using the bakeShader
                 glBindFramebuffer(GL_FRAMEBUFFER, bakeTextureFBO);
@@ -621,6 +619,7 @@ int main()
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /////////////////////////////////// IMGUI INTERFACE /////////////////////////////////////////////////////////////////////////////
+        
         if (keys[GLFW_KEY_SPACE]) 
         {
             ImGui_ImplOpenGL3_NewFrame();
@@ -629,6 +628,8 @@ int main()
             // ImGUI window creation
             ImGui::Begin("Performance");
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+        
             ImGui::Text("Mouse position: (%.5f, %.5f)", mouseX, mouseY);
             ImGui::Text("Width, height: (%.0f, %.0f)", float(screenWidth), float(screenHeight));
            
@@ -648,13 +649,22 @@ int main()
             ImGui::SliderFloat("Shininess: ", &shininess, 10.0f, 100.0f);
             ImGui::SliderFloat("Roughness Index: ", &alpha, 0.0f, 1.0f);
             ImGui::SliderFloat("Fresnel: ", &F0, 0.0f, 1.0f);
+
+            ImGui::Separator();
+            ImGui::Text("Patterns: ");
+            ImGui::SliderFloat("Power: ", &power, 0.0f, 5.0f);
+            ImGui::SliderFloat("Frequency: ", &frequency, 1.0f, 20.0f);
+            ImGui::SliderFloat("Harmonics: ", &harmonics, 1.0f, 7.0f);
         
+
             // Ends of imgui
             ImGui::End();
             // Renders the ImGUI elements
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
+
+        
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         // Swapping back and front buffers
@@ -990,17 +1000,21 @@ void PortalRenderLoop(Shader &mainShader, GLint shaderIndex[], GLint modelType[]
 
 
         // Step Two: Set Stecnil Opereation for front facing triangles to Replace when Stencil test and depth test are succesful
-        glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
-        glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        //glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_REPLACE);
+        //glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_KEEP);
     
 
         // Step Three: Set Stencil Test to ALWAYS, therefore it will always pass and replace the stencil value with i+1
-        glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
-        glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
+        glStencilFunc(GL_ALWAYS, i+1, 0xFF);
+        //glStencilFuncSeparate(GL_FRONT, GL_ALWAYS, i+1, 0xFF);
+        //glStencilFuncSeparate(GL_BACK, GL_NEVER, 0, 0xFF);
 
 
         // Step Four: Draw Portal Frame in the stencil Buffer
         // Note that every Portal has its own stencil value 
+        GLuint index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 
         // Set up ModelMatrix and Normalmatrix for the PortalFrame
         glm::mat4 planeModelMatrix = glm::mat4(1.0f);
@@ -1026,7 +1040,8 @@ void PortalRenderLoop(Shader &mainShader, GLint shaderIndex[], GLint modelType[]
 
 
         // Step Six: Set the stencil Function for front facing triangles such that we only draw if the value in the stencil buffer is i+1
-        glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
+        glStencilFunc(GL_EQUAL, i+1, 0xFF);
+        //glStencilFuncSeparate(GL_FRONT, GL_EQUAL, i+1, 0xFF);
         
 
         // Step Seven: Draw what is inside of the Portal
@@ -1039,6 +1054,9 @@ void PortalRenderLoop(Shader &mainShader, GLint shaderIndex[], GLint modelType[]
 
 
         // Step Nine: Draw our Portal again. This time only in the Depth Buffer
+        index = glGetSubroutineIndex(mainShader.Program, GL_FRAGMENT_SHADER, shader[FULLCOLOR].c_str());
+        glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+
         //Set up ModelMatrix for the first Plane
         planeModelMatrix = glm::mat4(1.0f);
         planeModelMatrix = glm::translate(planeModelMatrix, PortalPos[i]);

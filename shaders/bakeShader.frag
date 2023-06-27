@@ -27,7 +27,7 @@ void main() {
 
     // overwrite the meshcolor with paintColor if the paintColor is not black and the depth of the vertex is the nearest to the camera
     // this prevents coloring through the mesh 
-    if (paintColor.r + paintColor.g + paintColor.b > 0  && (currentDepth - 0.005 < depth))
+    if (paintColor.r + paintColor.g + paintColor.b > 0  && (currentDepth - 0.00005 < depth))
     {
         meshColor = paintColor;
     }
